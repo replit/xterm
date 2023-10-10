@@ -3,11 +3,11 @@
  * @license MIT
  */
 
-import { CharData, IBufferLine, ICellData, IAttributeData, IExtendedAttrs } from 'common/Types';
-import { stringFromCodePoint } from 'common/input/TextDecoder';
-import { CHAR_DATA_CHAR_INDEX, CHAR_DATA_WIDTH_INDEX, CHAR_DATA_ATTR_INDEX, NULL_CELL_CHAR, NULL_CELL_WIDTH, NULL_CELL_CODE, WHITESPACE_CELL_CHAR, Content, BgFlags, FgFlags } from 'common/buffer/Constants';
-import { CellData } from 'common/buffer/CellData';
+import { CharData, IAttributeData, IBufferLine, ICellData, IExtendedAttrs } from 'common/Types';
 import { AttributeData, ExtendedAttrs } from 'common/buffer/AttributeData';
+import { CellData } from 'common/buffer/CellData';
+import { Attributes, BgFlags, CHAR_DATA_ATTR_INDEX, CHAR_DATA_CHAR_INDEX, CHAR_DATA_WIDTH_INDEX, Content, NULL_CELL_CHAR, NULL_CELL_CODE, NULL_CELL_WIDTH, WHITESPACE_CELL_CHAR } from 'common/buffer/Constants';
+import { stringFromCodePoint } from 'common/input/TextDecoder';
 
 /**
  * buffer memory layout:
@@ -227,7 +227,7 @@ export class BufferLine implements IBufferLine {
    * onto a leading char. Since we already set the attrs
    * by the previous `setDataFromCodePoint` call, we can omit it here.
    */
-  public addCodepointToCell(index: number, codePoint: number): void {
+  public addCodepointToCell(index: number, codePoint: number, width: number): void {
     let content = this._data[index * CELL_SIZE + Cell.CONTENT];
     if (content & Content.IS_COMBINED_MASK) {
       // we already have a combined string, simply add
@@ -245,8 +245,12 @@ export class BufferLine implements IBufferLine {
         // simply set the data in the cell buffer with a width of 1
         content = codePoint | (1 << Content.WIDTH_SHIFT);
       }
-      this._data[index * CELL_SIZE + Cell.CONTENT] = content;
     }
+    if (width) {
+      content &= ~Content.WIDTH_MASK;
+      content |= width << Content.WIDTH_SHIFT;
+    }
+    this._data[index * CELL_SIZE + Cell.CONTENT] = content;
   }
 
   public insertCells(pos: number, n: number, fillCellData: ICellData, eraseAttr?: IAttributeData): void {
@@ -457,6 +461,15 @@ export class BufferLine implements IBufferLine {
   public getTrimmedLength(): number {
     for (let i = this.length - 1; i >= 0; --i) {
       if ((this._data[i * CELL_SIZE + Cell.CONTENT] & Content.HAS_CONTENT_MASK)) {
+        return i + (this._data[i * CELL_SIZE + Cell.CONTENT] >> Content.WIDTH_SHIFT);
+      }
+    }
+    return 0;
+  }
+
+  public getNoBgTrimmedLength(): number {
+    for (let i = this.length - 1; i >= 0; --i) {
+      if ((this._data[i * CELL_SIZE + Cell.CONTENT] & Content.HAS_CONTENT_MASK) || (this._data[i * CELL_SIZE + Cell.BG] & Attributes.CM_MASK)) {
         return i + (this._data[i * CELL_SIZE + Cell.CONTENT] >> Content.WIDTH_SHIFT);
       }
     }

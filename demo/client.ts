@@ -18,17 +18,28 @@ import { SerializeAddon } from '../addons/xterm-addon-serialize/out/SerializeAdd
 import { WebLinksAddon } from '../addons/xterm-addon-web-links/out/WebLinksAddon';
 import { WebglAddon } from '../addons/xterm-addon-webgl/out/WebglAddon';
 import { Unicode11Addon } from '../addons/xterm-addon-unicode11/out/Unicode11Addon';
+import { UnicodeGraphemesAddon } from '../addons/xterm-addon-unicode-graphemes/out/UnicodeGraphemesAddon';
 import { LigaturesAddon } from '../addons/xterm-addon-ligatures/out/LigaturesAddon';
+
+// Playwright/WebKit on Windows does not support WebAssembly https://stackoverflow.com/q/62311688/1156119
+import type { ImageAddonType, IImageAddonOptions } from '../addons/xterm-addon-image/out/ImageAddon';
+let ImageAddon: ImageAddonType | undefined; // eslint-disable-line @typescript-eslint/naming-convention
+if ('WebAssembly' in window) {
+  const imageAddon = require('../addons/xterm-addon-image/out/ImageAddon');
+  ImageAddon = imageAddon.ImageAddon;
+}
 
 // Use webpacked version (yarn package)
 // import { Terminal } from '../lib/xterm';
 // import { AttachAddon } from 'xterm-addon-attach';
 // import { FitAddon } from 'xterm-addon-fit';
+// import { ImageAddon } from 'xterm-addon-image';
 // import { SearchAddon, ISearchOptions } from 'xterm-addon-search';
 // import { SerializeAddon } from 'xterm-addon-serialize';
 // import { WebLinksAddon } from 'xterm-addon-web-links';
 // import { WebglAddon } from 'xterm-addon-webgl';
 // import { Unicode11Addon } from 'xterm-addon-unicode11';
+// import { UnicodeGraphemesAddon } from 'xterm-addon-unicode-graphemes';
 // import { LigaturesAddon } from 'xterm-addon-ligatures';
 
 // Pulling in the module's types relies on the <reference> above, it's looks a
@@ -39,12 +50,15 @@ export interface IWindowWithTerminal extends Window {
   term: TerminalType;
   Terminal?: typeof TerminalType; // eslint-disable-line @typescript-eslint/naming-convention
   AttachAddon?: typeof AttachAddon; // eslint-disable-line @typescript-eslint/naming-convention
+  CanvasAddon?: typeof CanvasAddon; // eslint-disable-line @typescript-eslint/naming-convention
   FitAddon?: typeof FitAddon; // eslint-disable-line @typescript-eslint/naming-convention
+  ImageAddon?: typeof ImageAddonType; // eslint-disable-line @typescript-eslint/naming-convention
   SearchAddon?: typeof SearchAddon; // eslint-disable-line @typescript-eslint/naming-convention
   SerializeAddon?: typeof SerializeAddon; // eslint-disable-line @typescript-eslint/naming-convention
   WebLinksAddon?: typeof WebLinksAddon; // eslint-disable-line @typescript-eslint/naming-convention
   WebglAddon?: typeof WebglAddon; // eslint-disable-line @typescript-eslint/naming-convention
   Unicode11Addon?: typeof Unicode11Addon; // eslint-disable-line @typescript-eslint/naming-convention
+  UnicodeGraphemesAddon?: typeof UnicodeGraphemesAddon; // eslint-disable-line @typescript-eslint/naming-convention
   LigaturesAddon?: typeof LigaturesAddon; // eslint-disable-line @typescript-eslint/naming-convention
 }
 declare let window: IWindowWithTerminal;
@@ -54,8 +68,9 @@ let protocol;
 let socketURL;
 let socket;
 let pid;
+let autoResize: boolean = true;
 
-type AddonType = 'attach' | 'canvas' | 'fit' | 'search' | 'serialize' | 'unicode11' | 'web-links' | 'webgl' | 'ligatures';
+type AddonType = 'attach' | 'canvas' | 'fit' | 'image' | 'search' | 'serialize' | 'unicode11' | 'unicodeGraphemes' | 'webLinks' | 'webgl' | 'ligatures';
 
 interface IDemoAddon<T extends AddonType> {
   name: T;
@@ -64,24 +79,28 @@ interface IDemoAddon<T extends AddonType> {
     T extends 'attach' ? typeof AttachAddon :
       T extends 'canvas' ? typeof CanvasAddon :
         T extends 'fit' ? typeof FitAddon :
-          T extends 'search' ? typeof SearchAddon :
-            T extends 'serialize' ? typeof SerializeAddon :
-              T extends 'web-links' ? typeof WebLinksAddon :
-                T extends 'unicode11' ? typeof Unicode11Addon :
-                  T extends 'ligatures' ? typeof LigaturesAddon :
-                    typeof WebglAddon
+          T extends 'image' ? typeof ImageAddonType :
+            T extends 'search' ? typeof SearchAddon :
+              T extends 'serialize' ? typeof SerializeAddon :
+                T extends 'webLinks' ? typeof WebLinksAddon :
+                  T extends 'unicode11' ? typeof Unicode11Addon :
+                    T extends 'unicodeGraphemes' ? typeof UnicodeGraphemesAddon :
+                      T extends 'ligatures' ? typeof LigaturesAddon :
+                        typeof WebglAddon
   );
   instance?: (
     T extends 'attach' ? AttachAddon :
       T extends 'canvas' ? CanvasAddon :
         T extends 'fit' ? FitAddon :
-          T extends 'search' ? SearchAddon :
-            T extends 'serialize' ? SerializeAddon :
-              T extends 'web-links' ? WebLinksAddon :
-                T extends 'webgl' ? WebglAddon :
-                  T extends 'unicode11' ? typeof Unicode11Addon :
-                    T extends 'ligatures' ? typeof LigaturesAddon :
-                      never
+          T extends 'image' ? ImageAddonType :
+            T extends 'search' ? SearchAddon :
+              T extends 'serialize' ? SerializeAddon :
+                T extends 'webLinks' ? WebLinksAddon :
+                  T extends 'webgl' ? WebglAddon :
+                    T extends 'unicode11' ? typeof Unicode11Addon :
+                      T extends 'unicodeGraphemes' ? typeof UnicodeGraphemesAddon :
+                        T extends 'ligatures' ? typeof LigaturesAddon :
+                          never
   );
 }
 
@@ -89,11 +108,13 @@ const addons: { [T in AddonType]: IDemoAddon<T> } = {
   attach: { name: 'attach', ctor: AttachAddon, canChange: false },
   canvas: { name: 'canvas', ctor: CanvasAddon, canChange: true },
   fit: { name: 'fit', ctor: FitAddon, canChange: false },
+  image: { name: 'image', ctor: ImageAddon, canChange: true },
   search: { name: 'search', ctor: SearchAddon, canChange: true },
   serialize: { name: 'serialize', ctor: SerializeAddon, canChange: true },
-  'web-links': { name: 'web-links', ctor: WebLinksAddon, canChange: true },
+  webLinks: { name: 'webLinks', ctor: WebLinksAddon, canChange: true },
   webgl: { name: 'webgl', ctor: WebglAddon, canChange: true },
   unicode11: { name: 'unicode11', ctor: Unicode11Addon, canChange: true },
+  unicodeGraphemes: { name: 'unicodeGraphemes', ctor: UnicodeGraphemesAddon, canChange: true },
   ligatures: { name: 'ligatures', ctor: LigaturesAddon, canChange: true }
 };
 
@@ -110,6 +131,7 @@ const xtermjsTheme = {
   foreground: '#F8F8F8',
   background: '#2D2E2C',
   selectionBackground: '#5DA5D533',
+  selectionInactiveBackground: '#555555AA',
   black: '#1E1E1D',
   brightBlack: '#262625',
   red: '#CE5C5C',
@@ -132,12 +154,11 @@ function setPadding(): void {
   addons.fit.instance.fit();
 }
 
-function getSearchOptions(e: KeyboardEvent): ISearchOptions {
+function getSearchOptions(): ISearchOptions {
   return {
     regex: (document.getElementById('regex') as HTMLInputElement).checked,
     wholeWord: (document.getElementById('whole-word') as HTMLInputElement).checked,
     caseSensitive: (document.getElementById('case-sensitive') as HTMLInputElement).checked,
-    incremental: e.key !== `Enter`,
     decorations: (document.getElementById('highlight-all-matches') as HTMLInputElement).checked ? {
       matchBackground: '#232422',
       matchBorder: '#555753',
@@ -159,11 +180,13 @@ const disposeRecreateButtonHandler: () => void = () => {
     addons.attach.instance = undefined;
     addons.canvas.instance = undefined;
     addons.fit.instance = undefined;
+    addons.image.instance = undefined;
     addons.search.instance = undefined;
     addons.serialize.instance = undefined;
     addons.unicode11.instance = undefined;
+    addons.unicodeGraphemes.instance = undefined;
     addons.ligatures.instance = undefined;
-    addons['web-links'].instance = undefined;
+    addons.webLinks.instance = undefined;
     addons.webgl.instance = undefined;
     document.getElementById('dispose').innerHTML = 'Recreate Terminal';
   } else {
@@ -204,10 +227,13 @@ const createNewWindowButtonHandler: () => void = () => {
 if (document.location.pathname === '/test') {
   window.Terminal = Terminal;
   window.AttachAddon = AttachAddon;
+  window.CanvasAddon = CanvasAddon;
   window.FitAddon = FitAddon;
+  window.ImageAddon = ImageAddon;
   window.SearchAddon = SearchAddon;
   window.SerializeAddon = SerializeAddon;
   window.Unicode11Addon = Unicode11Addon;
+  window.UnicodeGraphemesAddon = UnicodeGraphemesAddon;
   window.LigaturesAddon = LigaturesAddon;
   window.WebLinksAddon = WebLinksAddon;
   window.WebglAddon = WebglAddon;
@@ -226,10 +252,14 @@ if (document.location.pathname === '/test') {
   document.getElementById('ansi-colors').addEventListener('click', ansiColorsTest);
   document.getElementById('osc-hyperlinks').addEventListener('click', addAnsiHyperlink);
   document.getElementById('sgr-test').addEventListener('click', sgrTest);
+  document.getElementById('add-grapheme-clusters').addEventListener('click', addGraphemeClusters);
   document.getElementById('add-decoration').addEventListener('click', addDecoration);
   document.getElementById('add-overview-ruler').addEventListener('click', addOverviewRuler);
   document.getElementById('weblinks-test').addEventListener('click', testWeblinks);
+  document.getElementById('bce').addEventListener('click', coloredErase);
   addVtButtons();
+  initImageAddonExposed();
+  testEvents();
 }
 
 function createTerminal(): void {
@@ -241,7 +271,11 @@ function createTerminal(): void {
   const isWindows = ['Windows', 'Win16', 'Win32', 'WinCE'].indexOf(navigator.platform) >= 0;
   term = new Terminal({
     allowProposedApi: true,
-    windowsMode: isWindows,
+    windowsPty: isWindows ? {
+      // In a real scenario, these values should be verified on the backend
+      backend: 'conpty',
+      buildNumber: 22621
+    } : undefined,
     fontFamily: '"Fira Code", courier-new, courier, monospace, "Powerline Extra Symbols"',
     theme: xtermjsTheme
   } as ITerminalOptions);
@@ -251,18 +285,20 @@ function createTerminal(): void {
   addons.search.instance = new SearchAddon();
   addons.serialize.instance = new SerializeAddon();
   addons.fit.instance = new FitAddon();
-  addons.unicode11.instance = new Unicode11Addon();
+  addons.image.instance = new ImageAddon();
+  addons.unicodeGraphemes.instance = new UnicodeGraphemesAddon();
   try {  // try to start with webgl renderer (might throw on older safari/webkit)
     addons.webgl.instance = new WebglAddon();
   } catch (e) {
     console.warn(e);
   }
-  addons['web-links'].instance = new WebLinksAddon();
+  addons.webLinks.instance = new WebLinksAddon();
   typedTerm.loadAddon(addons.fit.instance);
+  typedTerm.loadAddon(addons.image.instance);
   typedTerm.loadAddon(addons.search.instance);
   typedTerm.loadAddon(addons.serialize.instance);
-  typedTerm.loadAddon(addons.unicode11.instance);
-  typedTerm.loadAddon(addons['web-links'].instance);
+  typedTerm.loadAddon(addons.unicodeGraphemes.instance);
+  typedTerm.loadAddon(addons.webLinks.instance);
 
   window.term = term;  // Expose `term` to window for debugging purposes
   term.onResize((size: { cols: number, rows: number }) => {
@@ -301,13 +337,32 @@ function createTerminal(): void {
 
   term.focus();
 
+  const resizeObserver = new ResizeObserver(entries => {
+    if (autoResize) {
+      addons.fit.instance.fit();
+    }
+  });
+  resizeObserver.observe(terminalContainer);
+
   addDomListener(paddingElement, 'change', setPadding);
 
-  addDomListener(actionElements.findNext, 'keyup', (e) => {
-    addons.search.instance.findNext(actionElements.findNext.value, getSearchOptions(e));
+  addDomListener(actionElements.findNext, 'keydown', (e) => {
+    if (e.key === 'Enter') {
+      addons.search.instance.findNext(actionElements.findNext.value, getSearchOptions());
+      e.preventDefault();
+    }
   });
-  addDomListener(actionElements.findPrevious, 'keyup', (e) => {
-    addons.search.instance.findPrevious(actionElements.findPrevious.value, getSearchOptions(e));
+  addDomListener(actionElements.findNext, 'input', (e) => {
+    addons.search.instance.findNext(actionElements.findNext.value, getSearchOptions());
+  });
+  addDomListener(actionElements.findPrevious, 'keydown', (e) => {
+    if (e.key === 'Enter') {
+      addons.search.instance.findPrevious(actionElements.findPrevious.value, getSearchOptions());
+      e.preventDefault();
+    }
+  });
+  addDomListener(actionElements.findPrevious, 'input', (e) => {
+    addons.search.instance.findPrevious(actionElements.findPrevious.value, getSearchOptions());
   });
   addDomListener(actionElements.findNext, 'blur', (e) => {
     addons.search.instance.clearActiveDecoration();
@@ -319,9 +374,6 @@ function createTerminal(): void {
   // fit is called within a setTimeout, cols and rows need this.
   setTimeout(async () => {
     initOptions(term);
-    // TODO: Clean this up, opt-cols/rows doesn't exist anymore
-    (document.getElementById(`opt-cols`) as HTMLInputElement).value = term.cols;
-    (document.getElementById(`opt-rows`) as HTMLInputElement).value = term.rows;
     paddingElement.value = '0';
 
     // Set terminal size again to set the specific dimensions on the demo
@@ -386,25 +438,29 @@ function initOptions(term: TerminalType): void {
     'cancelEvents',
     'convertEol',
     'termName',
+    'cols', 'rows', // subsumed by "size" (colsRows) option
     // Complex option
+    'linkHandler',
+    'logger',
     'theme',
-    'windowOptions'
+    'windowOptions',
+    'windowsPty'
   ];
   const stringOptions = {
     cursorStyle: ['block', 'underline', 'bar'],
+    cursorInactiveStyle: ['outline', 'block', 'bar', 'underline', 'none'],
     fastScrollModifier: ['none', 'alt', 'ctrl', 'shift'],
     fontFamily: null,
     fontWeight: ['normal', 'bold', '100', '200', '300', '400', '500', '600', '700', '800', '900'],
     fontWeightBold: ['normal', 'bold', '100', '200', '300', '400', '500', '600', '700', '800', '900'],
-    logLevel: ['debug', 'info', 'warn', 'error', 'off'],
+    logLevel: ['trace', 'debug', 'info', 'warn', 'error', 'off'],
     theme: ['default', 'xtermjs', 'sapphire', 'light'],
-    wordSeparator: null
+    wordSeparator: null,
+    colsRows: null
   };
   const options = Object.getOwnPropertyNames(term.options);
   const booleanOptions = [];
-  const numberOptions = [
-    'overviewRulerWidth'
-  ];
+  const numberOptions = [];
   options.filter(o => blacklistedOptions.indexOf(o) === -1).forEach(o => {
     switch (typeof term.options[o]) {
       case 'boolean':
@@ -431,7 +487,9 @@ function initOptions(term: TerminalType): void {
   });
   html += '</div><div class="option-group">';
   Object.keys(stringOptions).forEach(o => {
-    if (stringOptions[o]) {
+    if (o === 'colsRows') {
+      html += `<div class="option"><label>size (<var>cols</var><code>x</code><var>rows</var> or <code>auto</code>) <input id="opt-${o}" type="text" value="auto"/></label></div>`;
+    } else if (stringOptions[o]) {
       const selectedOption = o === 'theme' ? 'xtermjs' : term.options[o];
       html += `<div class="option"><label>${o} <select id="opt-${o}">${stringOptions[o].map(v => `<option ${v === selectedOption ? 'selected' : ''}>${v}</option>`).join('')}</select></label></div>`;
     } else {
@@ -455,11 +513,7 @@ function initOptions(term: TerminalType): void {
     const input = document.getElementById(`opt-${o}`) as HTMLInputElement;
     addDomListener(input, 'change', () => {
       console.log('change', o, input.value);
-      if (o === 'rows') {
-        term.resize(term.cols, parseInt(input.value));
-      } else if (o === 'cols') {
-        term.resize(parseInt(input.value), term.rows);
-      } else if (o === 'lineHeight') {
+      if (o === 'lineHeight') {
         term.options.lineHeight = parseFloat(input.value);
       } else if (o === 'scrollSensitivity') {
         term.options.scrollSensitivity = parseFloat(input.value);
@@ -478,7 +532,17 @@ function initOptions(term: TerminalType): void {
     addDomListener(input, 'change', () => {
       console.log('change', o, input.value);
       let value: any = input.value;
-      if (o === 'theme') {
+      if (o === 'colsRows') {
+        const m = input.value.match(/^([0-9]+)x([0-9]+)$/);
+        if (m) {
+          autoResize = false;
+          term.resize(parseInt(m[1]), parseInt(m[2]));
+        } else {
+          autoResize = true;
+          input.value = 'auto';
+          updateTerminalSize();
+        }
+      } else if (o === 'theme') {
         switch (input.value) {
           case 'default':
             value = undefined;
@@ -515,6 +579,8 @@ function initOptions(term: TerminalType): void {
             value = {
               background: '#ffffff',
               foreground: '#333333',
+              cursor: '#333333',
+              cursorAccent: '#ffffff',
               selectionBackground: '#add6ff',
               black: '#000000',
               blue: '#0451a5',
@@ -554,10 +620,26 @@ function initAddons(term: TerminalType): void {
     if (name === 'unicode11' && checkbox.checked) {
       term.unicode.activeVersion = '11';
     }
+    if (name === 'unicodeGraphemes' && checkbox.checked) {
+      term.unicode.activeVersion = '15-graphemes';
+    }
     if (name === 'search' && checkbox.checked) {
       addon.instance.onDidChangeResults(e => updateFindResults(e));
     }
     addDomListener(checkbox, 'change', () => {
+      if (name === 'image') {
+        if (checkbox.checked) {
+          const ctorOptionsJson = document.querySelector<HTMLTextAreaElement>('#image-options').value;
+          addon.instance = ctorOptionsJson
+            ? new addon.ctor(JSON.parse(ctorOptionsJson))
+            : new addon.ctor();
+          term.loadAddon(addon.instance);
+        } else {
+          addon.instance!.dispose();
+          addon.instance = undefined;
+        }
+        return;
+      }
       if (checkbox.checked) {
         addon.instance = new addon.ctor();
         try {
@@ -576,6 +658,8 @@ function initAddons(term: TerminalType): void {
             }, 0);
           } else if (name === 'unicode11') {
             term.unicode.activeVersion = '11';
+          } else if (name === 'unicodeGraphemes') {
+            term.unicode.activeVersion = '15-graphemes';
           } else if (name === 'search') {
             addon.instance.onDidChangeResults(e => updateFindResults(e));
           }
@@ -590,7 +674,7 @@ function initAddons(term: TerminalType): void {
           addons.webgl.instance.textureAtlas.remove();
         } else if (name === 'canvas') {
           addons.canvas.instance.textureAtlas.remove();
-        } else if (name === 'unicode11') {
+        } else if (name === 'unicode11' || name === 'unicodeGraphemes') {
           term.unicode.activeVersion = '6';
         }
         addon.instance!.dispose();
@@ -630,8 +714,10 @@ function addDomListener(element: HTMLElement, type: string, handler: (...args: a
 }
 
 function updateTerminalSize(): void {
-  const width = (term._core._renderService.dimensions.css.canvas.width + term._core.viewport.scrollBarWidth).toString() + 'px';
-  const height = (term._core._renderService.dimensions.css.canvas.height).toString() + 'px';
+  const width = autoResize ? '100%'
+    : (term._core._renderService.dimensions.css.canvas.width + term._core.viewport.scrollBarWidth).toString() + 'px';
+  const height = autoResize ? '100%'
+    : (term._core._renderService.dimensions.css.canvas.height).toString() + 'px';
   terminalContainer.style.width = width;
   terminalContainer.style.height = height;
   addons.fit.instance.fit();
@@ -965,7 +1051,9 @@ function sgrTest(): void {
     { ps: 45, name: 'Background Magenta' },
     { ps: 46, name: 'Background Cyan' },
     { ps: 47, name: 'Background White' },
-    { ps: 49, name: 'Background default' }
+    { ps: 49, name: 'Background default' },
+    { ps: 53, name: 'Overlined' },
+    { ps: 55, name: 'Not overlined' }
   ];
   const maxNameLength = entries.reduce<number>((p, c) => Math.max(c.name.length, p), 0);
   for (const e of entries) {
@@ -977,7 +1065,8 @@ function sgrTest(): void {
   }
   const comboEntries: { ps: number[] }[] = [
     { ps: [1, 2, 3, 4, 5, 6, 7, 9] },
-    { ps: [2, 41] }
+    { ps: [2, 41] },
+    { ps: [4, 53] }
   ];
   term.write('\n\n\r');
   term.writeln(`Combinations`);
@@ -1034,6 +1123,24 @@ const randomSgrAttributes = [
 ];
 function getRandomSgr(): string {
   return randomSgrAttributes[Math.floor(Math.random() * randomSgrAttributes.length)];
+}
+
+function addGraphemeClusters(): void {
+  term.write('\n\n\r');
+  term.writeln('🤣🤣🤣🤣🤣🤣🤣🤣🤣🤣 [Simple emoji v6: 10 cells, v15: 20 cells]');
+  term.writeln('\u{1F476}\u{1F3FF}\u{1F476} [baby with emoji modifier fitzpatrick type-6; baby]');
+  term.writeln('\u{1F469}\u200d\u{1f469}\u200d\u{1f466} [woman+zwj+woman+zwj+boy]');
+  term.writeln('\u{1F64B}\u{1F64B}\u{200D}\u{2642}\u{FE0F} [person/man raising hand]');
+  term.writeln('\u{1F3CB}\u{FE0F}=\u{1F3CB}\u{1F3FE}\u{200D}\u{2640}\u{FE0F} [person lifting weights emoji; woman lighting weights, medium dark]');
+  term.writeln('\u{1F469}\u{1F469}\u{200D}\u{1F393}\u{1F468}\u{1F3FF}\u{200D}\u{1F393} [woman; woman student; man student dark]');
+  term.writeln('\u{1f1f3}\u{1f1f4}_ [REGIONAL INDICATOR SYMBOL LETTER N and RI O]');
+  term.writeln('\u{1f1f3}_\u{1f1f4} {RI N; underscore; RI O]');
+  term.writeln('\u0061\u0301 [letter a with acute accent]');
+  term.writeln('\u1100\u1161\u11A8=\u1100\u1161= [Korean Jamo]');
+  term.writeln('\uAC00=\uD685= [Hangul syllables (pre-composed)]');
+  term.writeln('(\u26b0\ufe0e) [coffin with text_presentation]');
+  term.writeln('(\u26b0\ufe0f) [coffin with Emoji_presentation]');
+  term.writeln('<E\u0301\ufe0fg\ufe0fa\ufe0fl\ufe0fi\ufe0f\ufe0ft\ufe0fe\u0301\ufe0f> [Égalité (using separate acute) emoij_presentation]');
 }
 
 function addDecoration(): void {
@@ -1168,6 +1275,102 @@ ipv6 https://[::1]/with/some?vars=and&a#hash aaa
 stop at final '.': This is a sentence with an url to http://example.com.
 stop at final '?': Is this the right url http://example.com/?
 stop at final '?': Maybe this one http://example.com/with?arguments=false?
-  `;
+`;
   term.write(linkExamples.split('\n').join('\r\n'));
+}
+
+
+function coloredErase(): void {
+  const sp5 = '     ';
+  const data = `
+Test BG-colored Erase (BCE):
+  The color block in the following lines should look identical.
+  For newly created rows at the bottom the last color should be applied
+  for all cells to the right.
+
+ def   41   42   43   44   45   46   47\x1b[47m
+\x1b[m${sp5}\x1b[41m${sp5}\x1b[42m${sp5}\x1b[43m${sp5}\x1b[44m${sp5}\x1b[45m${sp5}\x1b[46m${sp5}\x1b[47m${sp5}
+\x1b[m\x1b[5X\x1b[41m\x1b[5C\x1b[5X\x1b[42m\x1b[5C\x1b[5X\x1b[43m\x1b[5C\x1b[5X\x1b[44m\x1b[5C\x1b[5X\x1b[45m\x1b[5C\x1b[5X\x1b[46m\x1b[5C\x1b[5X\x1b[47m\x1b[5C\x1b[5X\x1b[m
+`;
+  term.write(data.split('\n').join('\r\n'));
+}
+
+
+function initImageAddonExposed(): void {
+  const DEFAULT_OPTIONS: IImageAddonOptions = (addons.image.instance as any)._defaultOpts;
+  const limitStorageElement = document.querySelector<HTMLInputElement>('#image-storagelimit');
+  limitStorageElement.valueAsNumber = addons.image.instance.storageLimit;
+  addDomListener(limitStorageElement, 'change', () => {
+    try {
+      addons.image.instance.storageLimit = limitStorageElement.valueAsNumber;
+      limitStorageElement.valueAsNumber = addons.image.instance.storageLimit;
+      console.log('changed storageLimit to', addons.image.instance.storageLimit);
+    } catch (e) {
+      limitStorageElement.valueAsNumber = addons.image.instance.storageLimit;
+      console.log('storageLimit at', addons.image.instance.storageLimit);
+      throw e;
+    }
+  });
+  const showPlaceholderElement = document.querySelector<HTMLInputElement>('#image-showplaceholder');
+  showPlaceholderElement.checked = addons.image.instance.showPlaceholder;
+  addDomListener(showPlaceholderElement, 'change', () => {
+    addons.image.instance.showPlaceholder = showPlaceholderElement.checked;
+  });
+  const ctorOptionsElement = document.querySelector<HTMLTextAreaElement>('#image-options');
+  ctorOptionsElement.value = JSON.stringify(DEFAULT_OPTIONS, null, 2);
+
+  const sixelDemo = (url: string) => () => fetch(url)
+    .then(resp => resp.arrayBuffer())
+    .then(buffer => {
+      term.write('\r\n');
+      term.write(new Uint8Array(buffer));
+    });
+
+  const iipDemo = (url: string) => () => fetch(url)
+    .then(resp => resp.arrayBuffer())
+    .then(buffer => {
+      const data = new Uint8Array(buffer);
+      let sdata = '';
+      for (let i = 0; i < data.length; ++i) sdata += String.fromCharCode(data[i]);
+      term.write('\r\n');
+      term.write(`\x1b]1337;File=inline=1;size=${data.length}:${btoa(sdata)}\x1b\\`);
+    });
+
+  document.getElementById('image-demo1').addEventListener('click',
+    sixelDemo('https://raw.githubusercontent.com/saitoha/libsixel/master/images/snake.six'));
+  document.getElementById('image-demo2').addEventListener('click',
+    sixelDemo('https://raw.githubusercontent.com/jerch/node-sixel/master/testfiles/test2.sixel'));
+  document.getElementById('image-demo3').addEventListener('click',
+    iipDemo('https://raw.githubusercontent.com/jerch/node-sixel/master/palette.png'));
+
+  // demo for image retrieval API
+  term.element.addEventListener('click', (ev: MouseEvent) => {
+    if (!ev.ctrlKey || !addons.image.instance) return;
+
+    // TODO...
+    // if (ev.altKey) {
+    //   const sel = term.getSelectionPosition();
+    //   if (sel) {
+    //     addons.image.instance
+    //       .extractCanvasAtBufferRange(term.getSelectionPosition())
+    //       ?.toBlob(data => window.open(URL.createObjectURL(data), '_blank'));
+    //     return;
+    //   }
+    // }
+
+    const pos = term._core._mouseService!.getCoords(ev, term._core.screenElement!, term.cols, term.rows);
+    const x = pos[0] - 1;
+    const y = pos[1] - 1;
+    const canvas = ev.shiftKey
+      // ctrl+shift+click: get single tile
+      ? addons.image.instance.extractTileAtBufferCell(x, term.buffer.active.viewportY + y)
+      // ctrl+click: get original image
+      : addons.image.instance.getImageAtBufferCell(x, term.buffer.active.viewportY + y);
+    canvas?.toBlob(data => window.open(URL.createObjectURL(data), '_blank'));
+  });
+}
+
+function testEvents(): void {
+  document.getElementById('event-focus').addEventListener('click', ()=> term.focus());
+  document.getElementById('event-blur').addEventListener('click', ()=> term.blur());
 }

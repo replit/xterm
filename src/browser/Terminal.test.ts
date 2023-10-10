@@ -8,7 +8,7 @@ import { MockViewport, MockCompositionHelper, MockRenderer, TestTerminal } from 
 import { DEFAULT_ATTR_DATA } from 'common/buffer/BufferLine';
 import { CellData } from 'common/buffer/CellData';
 import { MockUnicodeService } from 'common/TestUtils.test';
-import { IMarker } from 'common/Types';
+import { IMarker, ScrollSource } from 'common/Types';
 import { ICoreService } from 'common/services/Services';
 
 const INIT_COLS = 80;
@@ -29,6 +29,7 @@ describe('Terminal', () => {
     term.refresh = () => { };
     (term as any).renderer = new MockRenderer();
     term.viewport = new MockViewport();
+    term.viewport.onRequestScrollLines(e => term.scrollLines(e.amount, e.suppressScrollEvent, ScrollSource.VIEWPORT));
     (term as any)._compositionHelper = new MockCompositionHelper();
     (term as any).element = {
       classList: {
@@ -1041,6 +1042,47 @@ describe('Terminal', () => {
     });
   });
 
+  describe('Windows Pty', () => {
+    it('should mark lines as wrapped when the line ends in a non-null character after a LF', async () => {
+      const data = [
+        'aaaaaaaaaa\n\r', // cannot wrap as it's the first
+        'aaaaaaaaa\n\r',  // wrapped (windows mode only)
+        'aaaaaaaaa'       // not wrapped
+      ];
+
+      const normalTerminal = new TestTerminal({ rows: 5, cols: 10, windowsPty: {} });
+      await normalTerminal.writeP(data.join(''));
+      assert.equal(normalTerminal.buffer.lines.get(0)!.isWrapped, false);
+      assert.equal(normalTerminal.buffer.lines.get(1)!.isWrapped, false);
+      assert.equal(normalTerminal.buffer.lines.get(2)!.isWrapped, false);
+
+      const windowsModeTerminal = new TestTerminal({ rows: 5, cols: 10, windowsPty: { backend: 'conpty', buildNumber: 19000 } });
+      await windowsModeTerminal.writeP(data.join(''));
+      assert.equal(windowsModeTerminal.buffer.lines.get(0)!.isWrapped, false);
+      assert.equal(windowsModeTerminal.buffer.lines.get(1)!.isWrapped, true, 'This line should wrap in Windows mode as the previous line ends in a non-null character');
+      assert.equal(windowsModeTerminal.buffer.lines.get(2)!.isWrapped, false);
+    });
+
+    it('should mark lines as wrapped when the line ends in a non-null character after a CUP', async () => {
+      const data = [
+        'aaaaaaaaaa\x1b[2;1H', // cannot wrap as it's the first
+        'aaaaaaaaa\x1b[3;1H',  // wrapped (windows mode only)
+        'aaaaaaaaa'             // not wrapped
+      ];
+
+      const normalTerminal = new TestTerminal({ rows: 5, cols: 10, windowsPty: {} });
+      await normalTerminal.writeP(data.join(''));
+      assert.equal(normalTerminal.buffer.lines.get(0)!.isWrapped, false);
+      assert.equal(normalTerminal.buffer.lines.get(1)!.isWrapped, false);
+      assert.equal(normalTerminal.buffer.lines.get(2)!.isWrapped, false);
+
+      const windowsModeTerminal = new TestTerminal({ rows: 5, cols: 10, windowsPty: { backend: 'conpty', buildNumber: 19000 } });
+      await windowsModeTerminal.writeP(data.join(''));
+      assert.equal(windowsModeTerminal.buffer.lines.get(0)!.isWrapped, false);
+      assert.equal(windowsModeTerminal.buffer.lines.get(1)!.isWrapped, true, 'This line should wrap in Windows mode as the previous line ends in a non-null character');
+      assert.equal(windowsModeTerminal.buffer.lines.get(2)!.isWrapped, false);
+    });
+  });
   describe('Windows Mode', () => {
     it('should mark lines as wrapped when the line ends in a non-null character after a LF', async () => {
       const data = [

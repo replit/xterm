@@ -3,13 +3,14 @@
  * @license MIT
  */
 
-import { Disposable } from 'common/Lifecycle';
 import { addDisposableDomListener } from 'browser/Lifecycle';
-import { IColorSet, IViewport, ReadonlyColorSet } from 'browser/Types';
-import { ICharSizeService, ICoreBrowserService, IRenderService, IThemeService } from 'browser/services/Services';
-import { IBufferService, IOptionsService } from 'common/services/Services';
-import { IBuffer } from 'common/buffer/Types';
+import { IViewport, ReadonlyColorSet } from 'browser/Types';
 import { IRenderDimensions } from 'browser/renderer/shared/Types';
+import { ICharSizeService, ICoreBrowserService, IRenderService, IThemeService } from 'browser/services/Services';
+import { EventEmitter } from 'common/EventEmitter';
+import { Disposable } from 'common/Lifecycle';
+import { IBuffer } from 'common/buffer/Types';
+import { IBufferService, IOptionsService } from 'common/services/Services';
 
 const FALLBACK_SCROLL_BAR_WIDTH = 15;
 
@@ -48,8 +49,10 @@ export class Viewport extends Disposable implements IViewport {
     target: -1
   };
 
+  private readonly _onRequestScrollLines = this.register(new EventEmitter<{ amount: number, suppressScrollEvent: boolean }>());
+  public readonly onRequestScrollLines = this._onRequestScrollLines.event;
+
   constructor(
-    private readonly _scrollLines: (amount: number) => void,
     private readonly _viewportElement: HTMLElement,
     private readonly _scrollArea: HTMLElement,
     @IBufferService private readonly _bufferService: IBufferService,
@@ -62,8 +65,8 @@ export class Viewport extends Disposable implements IViewport {
     super();
 
     // Measure the width of the scrollbar. If it is 0 we can assume it's an OSX overlay scrollbar.
-    // Unfortunately the overlay scrollbar would be hidden underneath the screen element in that case,
-    // therefore we account for a standard amount to make it visible
+    // Unfortunately the overlay scrollbar would be hidden underneath the screen element in that
+    // case, therefore we account for a standard amount to make it visible
     this.scrollBarWidth = (this._viewportElement.offsetWidth - this._scrollArea.offsetWidth) || FALLBACK_SCROLL_BAR_WIDTH;
     this.register(addDisposableDomListener(this._viewportElement, 'scroll', this._handleScroll.bind(this)));
 
@@ -78,11 +81,23 @@ export class Viewport extends Disposable implements IViewport {
     this.register(this._optionsService.onSpecificOptionChange('scrollback', () => this.syncScrollArea()));
 
     // Perform this async to ensure the ICharSizeService is ready.
-    setTimeout(() => this.syncScrollArea(), 0);
+    setTimeout(() => this.syncScrollArea());
   }
 
   private _handleThemeChange(colors: ReadonlyColorSet): void {
     this._viewportElement.style.backgroundColor = colors.background.css;
+  }
+
+  public reset(): void {
+    this._currentRowHeight = 0;
+    this._currentDeviceCellHeight = 0;
+    this._lastRecordedBufferLength = 0;
+    this._lastRecordedViewportHeight = 0;
+    this._lastRecordedBufferHeight = 0;
+    this._lastTouchY = 0;
+    this._lastScrollTop = 0;
+    // Sync on next animation frame to ensure the new terminal state is used
+    this._coreBrowserService.window.requestAnimationFrame(() => this.syncScrollArea());
   }
 
   /**
@@ -104,10 +119,10 @@ export class Viewport extends Disposable implements IViewport {
 
   private _innerRefresh(): void {
     if (this._charSizeService.height > 0) {
-      this._currentRowHeight = this._renderService.dimensions.device.cell.height / this._coreBrowserService.dpr;
-      this._currentDeviceCellHeight = this._renderService.dimensions.device.cell.height;
+      this._currentRowHeight = this._renderDimensions.device.cell.height / this._coreBrowserService.dpr;
+      this._currentDeviceCellHeight = this._renderDimensions.device.cell.height;
       this._lastRecordedViewportHeight = this._viewportElement.offsetHeight;
-      const newBufferHeight = Math.round(this._currentRowHeight * this._lastRecordedBufferLength) + (this._lastRecordedViewportHeight - this._renderService.dimensions.css.canvas.height);
+      const newBufferHeight = Math.round(this._currentRowHeight * this._lastRecordedBufferLength) + (this._lastRecordedViewportHeight - this._renderDimensions.css.canvas.height);
       if (this._lastRecordedBufferHeight !== newBufferHeight) {
         this._lastRecordedBufferHeight = newBufferHeight;
         this._scrollArea.style.height = this._lastRecordedBufferHeight + 'px';
@@ -175,13 +190,13 @@ export class Viewport extends Disposable implements IViewport {
     if (this._ignoreNextScrollEvent) {
       this._ignoreNextScrollEvent = false;
       // Still trigger the scroll so lines get refreshed
-      this._scrollLines(0);
+      this._onRequestScrollLines.fire({ amount: 0, suppressScrollEvent: true });
       return;
     }
 
     const newRow = Math.round(this._lastScrollTop / this._currentRowHeight);
     const diff = newRow - this._bufferService.buffer.ydisp;
-    this._scrollLines(diff);
+    this._onRequestScrollLines.fire({ amount: diff, suppressScrollEvent: true });
   }
 
   private _smoothScroll(): void {
@@ -261,6 +276,26 @@ export class Viewport extends Disposable implements IViewport {
       }
     }
     return this._bubbleScroll(ev, amount);
+  }
+
+  public scrollLines(disp: number): void {
+    if (disp === 0) {
+      return;
+    }
+    if (!this._optionsService.rawOptions.smoothScrollDuration) {
+      this._onRequestScrollLines.fire({ amount: disp, suppressScrollEvent: false });
+    } else {
+      const amount = disp * this._currentRowHeight;
+      this._smoothScrollState.startTime = Date.now();
+      if (this._smoothScrollPercent() < 1) {
+        this._smoothScrollState.origin = this._viewportElement.scrollTop;
+        this._smoothScrollState.target = this._smoothScrollState.origin + amount;
+        this._smoothScrollState.target = Math.max(Math.min(this._smoothScrollState.target, this._viewportElement.scrollHeight), 0);
+        this._smoothScroll();
+      } else {
+        this._clearSmoothScrollState();
+      }
+    }
   }
 
   private _getPixelsScrolled(ev: WheelEvent): number {

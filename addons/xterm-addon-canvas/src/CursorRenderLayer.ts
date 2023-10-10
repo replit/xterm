@@ -3,16 +3,17 @@
  * @license MIT
  */
 
+import { CursorBlinkStateManager } from 'browser/renderer/shared/CursorBlinkStateManager';
 import { IRenderDimensions, IRequestRedrawEvent } from 'browser/renderer/shared/Types';
-import { BaseRenderLayer } from './BaseRenderLayer';
+import { ICoreBrowserService, IThemeService } from 'browser/services/Services';
+import { IEventEmitter } from 'common/EventEmitter';
+import { MutableDisposable } from 'common/Lifecycle';
+import { isFirefox } from 'common/Platform';
 import { ICellData } from 'common/Types';
 import { CellData } from 'common/buffer/CellData';
-import { IColorSet, ReadonlyColorSet } from 'browser/Types';
-import { IBufferService, IOptionsService, ICoreService, IDecorationService } from 'common/services/Services';
-import { IEventEmitter } from 'common/EventEmitter';
-import { ICoreBrowserService, IThemeService } from 'browser/services/Services';
+import { IBufferService, ICoreService, IDecorationService, IOptionsService } from 'common/services/Services';
 import { Terminal } from 'xterm';
-import { toDisposable } from 'common/Lifecycle';
+import { BaseRenderLayer } from './BaseRenderLayer';
 
 interface ICursorState {
   x: number;
@@ -22,15 +23,10 @@ interface ICursorState {
   width: number;
 }
 
-/**
- * The time between cursor blinks.
- */
-const BLINK_INTERVAL = 600;
-
 export class CursorRenderLayer extends BaseRenderLayer {
   private _state: ICursorState;
   private _cursorRenderers: {[key: string]: (x: number, y: number, cell: ICellData) => void};
-  private _cursorBlinkStateManager: CursorBlinkStateManager | undefined;
+  private _cursorBlinkStateManager: MutableDisposable<CursorBlinkStateManager> = this.register(new MutableDisposable());
   private _cell: ICellData = new CellData();
 
   constructor(
@@ -56,13 +52,11 @@ export class CursorRenderLayer extends BaseRenderLayer {
     this._cursorRenderers = {
       'bar': this._renderBarCursor.bind(this),
       'block': this._renderBlockCursor.bind(this),
-      'underline': this._renderUnderlineCursor.bind(this)
+      'underline': this._renderUnderlineCursor.bind(this),
+      'outline': this._renderOutlineCursor.bind(this)
     };
     this.register(optionsService.onOptionChange(() => this._handleOptionsChanged()));
-    this.register(toDisposable(() => {
-      this._cursorBlinkStateManager?.dispose();
-      this._cursorBlinkStateManager = undefined;
-    }));
+    this._handleOptionsChanged();
   }
 
   public resize(dim: IRenderDimensions): void {
@@ -79,30 +73,27 @@ export class CursorRenderLayer extends BaseRenderLayer {
 
   public reset(): void {
     this._clearCursor();
-    this._cursorBlinkStateManager?.restartBlinkAnimation();
+    this._cursorBlinkStateManager.value?.restartBlinkAnimation();
     this._handleOptionsChanged();
   }
 
   public handleBlur(): void {
-    this._cursorBlinkStateManager?.pause();
+    this._cursorBlinkStateManager.value?.pause();
     this._onRequestRedraw.fire({ start: this._bufferService.buffer.y, end: this._bufferService.buffer.y });
   }
 
   public handleFocus(): void {
-    this._cursorBlinkStateManager?.resume();
+    this._cursorBlinkStateManager.value?.resume();
     this._onRequestRedraw.fire({ start: this._bufferService.buffer.y, end: this._bufferService.buffer.y });
   }
 
   private _handleOptionsChanged(): void {
     if (this._optionsService.rawOptions.cursorBlink) {
-      if (!this._cursorBlinkStateManager) {
-        this._cursorBlinkStateManager = new CursorBlinkStateManager(this._coreBrowserService.isFocused, () => {
-          this._render(true);
-        }, this._coreBrowserService);
+      if (!this._cursorBlinkStateManager.value) {
+        this._cursorBlinkStateManager.value = new CursorBlinkStateManager(() => this._render(true), this._coreBrowserService);
       }
     } else {
-      this._cursorBlinkStateManager?.dispose();
-      this._cursorBlinkStateManager = undefined;
+      this._cursorBlinkStateManager.clear();
     }
     // Request a refresh from the terminal as management of rendering is being
     // moved back to the terminal
@@ -110,14 +101,14 @@ export class CursorRenderLayer extends BaseRenderLayer {
   }
 
   public handleCursorMove(): void {
-    this._cursorBlinkStateManager?.restartBlinkAnimation();
+    this._cursorBlinkStateManager.value?.restartBlinkAnimation();
   }
 
   public handleGridChanged(startRow: number, endRow: number): void {
-    if (!this._cursorBlinkStateManager || this._cursorBlinkStateManager.isPaused) {
+    if (!this._cursorBlinkStateManager.value || this._cursorBlinkStateManager.value.isPaused) {
       this._render(false);
     } else {
-      this._cursorBlinkStateManager.restartBlinkAnimation();
+      this._cursorBlinkStateManager.value.restartBlinkAnimation();
     }
   }
 
@@ -149,10 +140,9 @@ export class CursorRenderLayer extends BaseRenderLayer {
       this._ctx.save();
       this._ctx.fillStyle = this._themeService.colors.cursor.css;
       const cursorStyle = this._optionsService.rawOptions.cursorStyle;
-      if (cursorStyle && cursorStyle !== 'block') {
-        this._cursorRenderers[cursorStyle](cursorX, viewportRelativeCursorY, this._cell);
-      } else {
-        this._renderBlurCursor(cursorX, viewportRelativeCursorY, this._cell);
+      const cursorInactiveStyle = this._optionsService.rawOptions.cursorInactiveStyle;
+      if (cursorInactiveStyle && cursorInactiveStyle !== 'none') {
+        this._cursorRenderers[cursorInactiveStyle](cursorX, viewportRelativeCursorY, this._cell);
       }
       this._ctx.restore();
       this._state.x = cursorX;
@@ -164,7 +154,7 @@ export class CursorRenderLayer extends BaseRenderLayer {
     }
 
     // Don't draw the cursor if it's blinking
-    if (this._cursorBlinkStateManager && !this._cursorBlinkStateManager.isCursorVisible) {
+    if (this._cursorBlinkStateManager.value && !this._cursorBlinkStateManager.value.isCursorVisible) {
       this._clearCursor();
       return;
     }
@@ -194,8 +184,9 @@ export class CursorRenderLayer extends BaseRenderLayer {
 
   private _clearCursor(): void {
     if (this._state) {
-      // Avoid potential rounding errors when device pixel ratio is less than 1
-      if (this._coreBrowserService.dpr < 1) {
+      // Avoid potential rounding errors when browser is Firefox (#4487) or device pixel ratio is
+      // less than 1
+      if (isFirefox || this._coreBrowserService.dpr < 1) {
         this._clearAll();
       } else {
         this._clearCells(this._state.x, this._state.y, this._state.width, 1);
@@ -233,146 +224,10 @@ export class CursorRenderLayer extends BaseRenderLayer {
     this._ctx.restore();
   }
 
-  private _renderBlurCursor(x: number, y: number, cell: ICellData): void {
+  private _renderOutlineCursor(x: number, y: number, cell: ICellData): void {
     this._ctx.save();
     this._ctx.strokeStyle = this._themeService.colors.cursor.css;
     this._strokeRectAtCell(x, y, cell.getWidth(), 1);
     this._ctx.restore();
-  }
-}
-
-class CursorBlinkStateManager {
-  public isCursorVisible: boolean;
-
-  private _animationFrame: number | undefined;
-  private _blinkStartTimeout: number | undefined;
-  private _blinkInterval: number | undefined;
-
-  /**
-   * The time at which the animation frame was restarted, this is used on the
-   * next render to restart the timers so they don't need to restart the timers
-   * multiple times over a short period.
-   */
-  private _animationTimeRestarted: number | undefined;
-
-  constructor(
-    isFocused: boolean,
-    private _renderCallback: () => void,
-    private _coreBrowserService: ICoreBrowserService
-  ) {
-    this.isCursorVisible = true;
-    if (isFocused) {
-      this._restartInterval();
-    }
-  }
-
-  public get isPaused(): boolean { return !(this._blinkStartTimeout || this._blinkInterval); }
-
-  public dispose(): void {
-    if (this._blinkInterval) {
-      this._coreBrowserService.window.clearInterval(this._blinkInterval);
-      this._blinkInterval = undefined;
-    }
-    if (this._blinkStartTimeout) {
-      this._coreBrowserService.window.clearTimeout(this._blinkStartTimeout);
-      this._blinkStartTimeout = undefined;
-    }
-    if (this._animationFrame) {
-      this._coreBrowserService.window.cancelAnimationFrame(this._animationFrame);
-      this._animationFrame = undefined;
-    }
-  }
-
-  public restartBlinkAnimation(): void {
-    if (this.isPaused) {
-      return;
-    }
-    // Save a timestamp so that the restart can be done on the next interval
-    this._animationTimeRestarted = Date.now();
-    // Force a cursor render to ensure it's visible and in the correct position
-    this.isCursorVisible = true;
-    if (!this._animationFrame) {
-      this._animationFrame = this._coreBrowserService.window.requestAnimationFrame(() => {
-        this._renderCallback();
-        this._animationFrame = undefined;
-      });
-    }
-  }
-
-  private _restartInterval(timeToStart: number = BLINK_INTERVAL): void {
-    // Clear any existing interval
-    if (this._blinkInterval) {
-      this._coreBrowserService.window.clearInterval(this._blinkInterval);
-      this._blinkInterval = undefined;
-    }
-
-    // Setup the initial timeout which will hide the cursor, this is done before
-    // the regular interval is setup in order to support restarting the blink
-    // animation in a lightweight way (without thrashing clearInterval and
-    // setInterval).
-    this._blinkStartTimeout = this._coreBrowserService.window.setTimeout(() => {
-      // Check if another animation restart was requested while this was being
-      // started
-      if (this._animationTimeRestarted) {
-        const time = BLINK_INTERVAL - (Date.now() - this._animationTimeRestarted);
-        this._animationTimeRestarted = undefined;
-        if (time > 0) {
-          this._restartInterval(time);
-          return;
-        }
-      }
-
-      // Hide the cursor
-      this.isCursorVisible = false;
-      this._animationFrame = this._coreBrowserService.window.requestAnimationFrame(() => {
-        this._renderCallback();
-        this._animationFrame = undefined;
-      });
-
-      // Setup the blink interval
-      this._blinkInterval = this._coreBrowserService.window.setInterval(() => {
-        // Adjust the animation time if it was restarted
-        if (this._animationTimeRestarted) {
-          // calc time diff
-          // Make restart interval do a setTimeout initially?
-          const time = BLINK_INTERVAL - (Date.now() - this._animationTimeRestarted);
-          this._animationTimeRestarted = undefined;
-          this._restartInterval(time);
-          return;
-        }
-
-        // Invert visibility and render
-        this.isCursorVisible = !this.isCursorVisible;
-        this._animationFrame = this._coreBrowserService.window.requestAnimationFrame(() => {
-          this._renderCallback();
-          this._animationFrame = undefined;
-        });
-      }, BLINK_INTERVAL);
-    }, timeToStart);
-  }
-
-  public pause(): void {
-    this.isCursorVisible = true;
-    if (this._blinkInterval) {
-      this._coreBrowserService.window.clearInterval(this._blinkInterval);
-      this._blinkInterval = undefined;
-    }
-    if (this._blinkStartTimeout) {
-      this._coreBrowserService.window.clearTimeout(this._blinkStartTimeout);
-      this._blinkStartTimeout = undefined;
-    }
-    if (this._animationFrame) {
-      this._coreBrowserService.window.cancelAnimationFrame(this._animationFrame);
-      this._animationFrame = undefined;
-    }
-  }
-
-  public resume(): void {
-    // Clear out any existing timers just in case
-    this.pause();
-
-    this._animationTimeRestarted = undefined;
-    this._restartInterval();
-    this.restartBlinkAnimation();
   }
 }

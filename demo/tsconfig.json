@@ -1,13 +1,14 @@
 {
   "compilerOptions": {
     "module": "commonjs",
-    "target": "es2015",
+    "target": "es2021",
     "rootDir": ".",
     "sourceMap": true,
     "baseUrl": ".",
     "paths": {
       "xterm-addon-attach": ["../addons/xterm-addon-attach"],
       "xterm-addon-fit": ["../addons/xterm-addon-fit"],
+      "xterm-addon-image": ["../addons/xterm-addon-image"],
       "xterm-addon-search": ["../addons/xterm-addon-search"],
       "xterm-addon-serialize": ["../addons/xterm-addon-serialize"],
       "xterm-addon-web-links": ["../addons/xterm-addon-web-links"],

@@ -349,7 +349,8 @@ const enum VectorType {
  * not been patched with powerline characters and also to get pixel perfect rendering as rendering
  * issues can occur around AA/SPAA.
  *
- * The line variants draw beyond the cell and get clipped to ensure the end of the line is not visible.
+ * The line variants draw beyond the cell and get clipped to ensure the end of the line is not
+ * visible.
  *
  * Original symbols defined in https://github.com/powerline/fontpatcher
  */
@@ -365,11 +366,11 @@ export const powerlineDefinitions: { [index: string]: IVectorShape } = {
   // Right semi-circle solid
   '\u{E0B4}': { d: 'M0,0 L0,1 C0.552,1,1,0.776,1,.5 C1,0.224,0.552,0,0,0', type: VectorType.FILL, rightPadding: 1 },
   // Right semi-circle line
-  '\u{E0B5}': { d: 'M0,1 C0.552,1,1,0.776,1,.5 C1,0.224,0.552,0,0,0', type: VectorType.STROKE, rightPadding: 1 },
+  '\u{E0B5}': { d: 'M.2,1 C.422,1,.8,.826,.78,.5 C.8,.174,0.422,0,.2,0', type: VectorType.STROKE, rightPadding: 1 },
   // Left semi-circle solid
   '\u{E0B6}': { d: 'M1,0 L1,1 C0.448,1,0,0.776,0,.5 C0,0.224,0.448,0,1,0', type: VectorType.FILL, leftPadding: 1 },
   // Left semi-circle line
-  '\u{E0B7}': { d: 'M1,1 C0.448,1,0,0.776,0,.5 C0,0.224,0.448,0,1,0', type: VectorType.STROKE, leftPadding: 1 },
+  '\u{E0B7}': { d: 'M.8,1 C0.578,1,0.2,.826,.22,.5 C0.2,0.174,0.578,0,0.8,0', type: VectorType.STROKE, leftPadding: 1 },
   // Lower left triangle
   '\u{E0B8}': { d: 'M-.5,-.5 L1.5,1.5 L-.5,1.5', type: VectorType.FILL },
   // Backslash separator
@@ -383,10 +384,10 @@ export const powerlineDefinitions: { [index: string]: IVectorShape } = {
   // Upper right triangle
   '\u{E0BE}': { d: 'M-.5,-.5 L1.5,1.5 L1.5,-.5', type: VectorType.FILL }
 };
-// Backslash separator redundant
-powerlineDefinitions['\u{E0BB}'] = powerlineDefinitions['\u{E0B9}'];
 // Forward slash separator redundant
-powerlineDefinitions['\u{E0BF}'] = powerlineDefinitions['\u{E0BD}'];
+powerlineDefinitions['\u{E0BB}'] = powerlineDefinitions['\u{E0BD}'];
+// Backslash separator redundant
+powerlineDefinitions['\u{E0BF}'] = powerlineDefinitions['\u{E0B9}'];
 
 /**
  * Try drawing a custom block element or box drawing character, returning whether it was

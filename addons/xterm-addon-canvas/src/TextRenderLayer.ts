@@ -4,18 +4,16 @@
  */
 
 import { IRenderDimensions } from 'browser/renderer/shared/Types';
-import { CharData, ICellData } from 'common/Types';
-import { GridCache } from './GridCache';
-import { BaseRenderLayer } from './BaseRenderLayer';
-import { AttributeData } from 'common/buffer/AttributeData';
-import { NULL_CELL_CODE, Content, UnderlineStyle } from 'common/buffer/Constants';
-import { IColorSet, ReadonlyColorSet } from 'browser/Types';
-import { CellData } from 'common/buffer/CellData';
-import { IOptionsService, IBufferService, IDecorationService } from 'common/services/Services';
-import { ICharacterJoinerService, ICoreBrowserService, IThemeService } from 'browser/services/Services';
 import { JoinedCellData } from 'browser/services/CharacterJoinerService';
-import { color, css } from 'common/Color';
+import { ICharacterJoinerService, ICoreBrowserService, IThemeService } from 'browser/services/Services';
+import { CharData, ICellData } from 'common/Types';
+import { AttributeData } from 'common/buffer/AttributeData';
+import { CellData } from 'common/buffer/CellData';
+import { Content, NULL_CELL_CODE } from 'common/buffer/Constants';
+import { IBufferService, IDecorationService, IOptionsService } from 'common/services/Services';
 import { Terminal } from 'xterm';
+import { BaseRenderLayer } from './BaseRenderLayer';
+import { GridCache } from './GridCache';
 
 /**
  * This CharData looks like a null character, which will forc a clear and render
@@ -186,12 +184,6 @@ export class TextRenderLayer extends BaseRenderLayer {
         nextFillStyle = `rgb(${AttributeData.toColorRGB(cell.getBgColor()).join(',')})`;
       } else if (cell.isBgPalette()) {
         nextFillStyle = this._themeService.colors.ansi[cell.getBgColor()].css;
-      }
-
-      // Apply dim to the background, this is relatively slow as the CSS is re-parsed but dim is
-      // rarely used
-      if (nextFillStyle && cell.isDim()) {
-        nextFillStyle = color.multiplyOpacity(css.toColor(nextFillStyle), 0.5).css;
       }
 
       // Get any decoration foreground/background overrides, this must be fetched before the early

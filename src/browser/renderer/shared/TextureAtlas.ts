@@ -3,18 +3,20 @@
  * @license MIT
  */
 
+import { IColorContrastCache } from 'browser/Types';
 import { DIM_OPACITY, TEXT_BASELINE } from 'browser/renderer/shared/Constants';
-import { DEFAULT_COLOR, Attributes, DEFAULT_EXT, UnderlineStyle } from 'common/buffer/Constants';
-import { IColor } from 'common/Types';
-import { AttributeData } from 'common/buffer/AttributeData';
-import { color, NULL_COLOR, rgba } from 'common/Color';
 import { tryDrawCustomChar } from 'browser/renderer/shared/CustomGlyphs';
 import { excludeFromContrastRatioDemands, isPowerlineGlyph, isRestrictedPowerlineGlyph, throwIfFalsy } from 'browser/renderer/shared/RendererUtils';
-import { IUnicodeService } from 'common/services/Services';
+import { IBoundingBox, ICharAtlasConfig, IRasterizedGlyph, ITextureAtlas } from 'browser/renderer/shared/Types';
+import { NULL_COLOR, color, rgba } from 'common/Color';
+import { EventEmitter } from 'common/EventEmitter';
 import { FourKeyMap } from 'common/MultiKeyMap';
 import { IdleTaskQueue } from 'common/TaskQueue';
-import { IBoundingBox, ICharAtlasConfig, IRasterizedGlyph, IRequestRedrawEvent, ITextureAtlas } from 'browser/renderer/shared/Types';
-import { EventEmitter } from 'common/EventEmitter';
+import { IColor } from 'common/Types';
+import { AttributeData } from 'common/buffer/AttributeData';
+import { Attributes, DEFAULT_COLOR, DEFAULT_EXT, UnderlineStyle } from 'common/buffer/Constants';
+import { traceCall } from 'common/services/LogService';
+import { IUnicodeService } from 'common/services/Services';
 
 /**
  * A shared object which is used to draw nothing for a particular cell.
@@ -149,50 +151,48 @@ export class TextureAtlas implements ITextureAtlas {
     // microtask to ensure it does not interrupt textures that will be rendered in the current
     // animation frame which would result in blank rendered areas. This is actually not that
     // expensive relative to drawing the glyphs, so there is no need to wait for an idle callback.
-    if (TextureAtlas.maxAtlasPages && this._pages.length >= Math.max(4, TextureAtlas.maxAtlasPages / 2)) {
-      queueMicrotask(() => {
-        // Find the set of the largest 4 images, below the maximum size, with the highest
-        // percentages used
-        const pagesBySize = this._pages.filter(e => {
-          return e.canvas.width * 2 <= (TextureAtlas.maxTextureSize || Constants.FORCED_MAX_TEXTURE_SIZE);
-        }).sort((a, b) => {
-          if (b.canvas.width !== a.canvas.width) {
-            return b.canvas.width - a.canvas.width;
-          }
-          return b.percentageUsed - a.percentageUsed;
-        });
-        let sameSizeI = -1;
-        let size = 0;
-        for (let i = 0; i < pagesBySize.length; i++) {
-          if (pagesBySize[i].canvas.width !== size) {
-            sameSizeI = i;
-            size = pagesBySize[i].canvas.width;
-          } else if (i - sameSizeI === 3) {
-            break;
-          }
+    if (TextureAtlas.maxAtlasPages && this._pages.length >= Math.max(4, TextureAtlas.maxAtlasPages)) {
+      // Find the set of the largest 4 images, below the maximum size, with the highest
+      // percentages used
+      const pagesBySize = this._pages.filter(e => {
+        return e.canvas.width * 2 <= (TextureAtlas.maxTextureSize || Constants.FORCED_MAX_TEXTURE_SIZE);
+      }).sort((a, b) => {
+        if (b.canvas.width !== a.canvas.width) {
+          return b.canvas.width - a.canvas.width;
         }
-
-        // Gather details of the merge
-        const mergingPages = pagesBySize.slice(sameSizeI, sameSizeI + 4);
-        const sortedMergingPagesIndexes = mergingPages.map(e => e.glyphs[0].texturePage).sort((a, b) => a > b ? 1 : -1);
-        const mergedPageIndex = sortedMergingPagesIndexes[0];
-
-        // Merge into the new page
-        const mergedPage = this._mergePages(mergingPages, mergedPageIndex);
-        mergedPage.version++;
-
-        // Replace the first _merging_ page with the _merged_ page
-        this._pages[mergedPageIndex] = mergedPage;
-
-        // Delete the other 3 pages, shifting glyph texture pages as needed
-        for (let i = sortedMergingPagesIndexes.length - 1; i >= 1; i--) {
-          this._deletePage(sortedMergingPagesIndexes[i]);
-        }
-
-        // Request the model to be cleared to refresh all texture pages.
-        this._requestClearModel = true;
-        this._onAddTextureAtlasCanvas.fire(mergedPage.canvas);
+        return b.percentageUsed - a.percentageUsed;
       });
+      let sameSizeI = -1;
+      let size = 0;
+      for (let i = 0; i < pagesBySize.length; i++) {
+        if (pagesBySize[i].canvas.width !== size) {
+          sameSizeI = i;
+          size = pagesBySize[i].canvas.width;
+        } else if (i - sameSizeI === 3) {
+          break;
+        }
+      }
+
+      // Gather details of the merge
+      const mergingPages = pagesBySize.slice(sameSizeI, sameSizeI + 4);
+      const sortedMergingPagesIndexes = mergingPages.map(e => e.glyphs[0].texturePage).sort((a, b) => a > b ? 1 : -1);
+      const mergedPageIndex = this.pages.length - mergingPages.length;
+
+      // Merge into the new page
+      const mergedPage = this._mergePages(mergingPages, mergedPageIndex);
+      mergedPage.version++;
+
+      // Delete the pages, shifting glyph texture pages as needed
+      for (let i = sortedMergingPagesIndexes.length - 1; i >= 0; i--) {
+        this._deletePage(sortedMergingPagesIndexes[i]);
+      }
+
+      // Add the new merged page to the end
+      this.pages.push(mergedPage);
+
+      // Request the model to be cleared to refresh all texture pages.
+      this._requestClearModel = true;
+      this._onAddTextureAtlasCanvas.fire(mergedPage.canvas);
     }
 
     // All new atlas pages are created small as they are highly dynamic
@@ -242,12 +242,12 @@ export class TextureAtlas implements ITextureAtlas {
     }
   }
 
-  public getRasterizedGlyphCombinedChar(chars: string, bg: number, fg: number, ext: number): IRasterizedGlyph {
-    return this._getFromCacheMap(this._cacheMapCombined, chars, bg, fg, ext);
+  public getRasterizedGlyphCombinedChar(chars: string, bg: number, fg: number, ext: number, restrictToCellHeight: boolean): IRasterizedGlyph {
+    return this._getFromCacheMap(this._cacheMapCombined, chars, bg, fg, ext, restrictToCellHeight);
   }
 
-  public getRasterizedGlyph(code: number, bg: number, fg: number, ext: number): IRasterizedGlyph {
-    return this._getFromCacheMap(this._cacheMap, code, bg, fg, ext);
+  public getRasterizedGlyph(code: number, bg: number, fg: number, ext: number, restrictToCellHeight: boolean): IRasterizedGlyph {
+    return this._getFromCacheMap(this._cacheMap, code, bg, fg, ext, restrictToCellHeight);
   }
 
   /**
@@ -258,11 +258,12 @@ export class TextureAtlas implements ITextureAtlas {
     key: string | number,
     bg: number,
     fg: number,
-    ext: number
+    ext: number,
+    restrictToCellHeight: boolean = false
   ): IRasterizedGlyph {
     $glyph = cacheMap.get(key, bg, fg, ext);
     if (!$glyph) {
-      $glyph = this._drawToCache(key, bg, fg, ext);
+      $glyph = this._drawToCache(key, bg, fg, ext, restrictToCellHeight);
       cacheMap.set(key, bg, fg, ext, $glyph);
     }
     return $glyph;
@@ -297,25 +298,18 @@ export class TextureAtlas implements ITextureAtlas {
       case Attributes.CM_DEFAULT:
       default:
         if (inverse) {
-          result = this._config.colors.foreground;
+          result = color.opaque(this._config.colors.foreground);
         } else {
           result = this._config.colors.background;
         }
         break;
     }
 
-    if (dim) {
-      // Blend here instead of using opacity because transparent colors mess with clipping the
-      // glyph's bounding box
-      result = color.blend(this._config.colors.background, color.multiplyOpacity(result, DIM_OPACITY));
-    }
-
     return result;
   }
 
   private _getForegroundColor(bg: number, bgColorMode: number, bgColor: number, fg: number, fgColorMode: number, fgColor: number, inverse: boolean, dim: boolean, bold: boolean, excludeFromContrastRatioDemands: boolean): IColor {
-    // TODO: Pass dim along to get min contrast?
-    const minimumContrastColor = this._getMinimumContrastColor(bg, bgColorMode, bgColor, fg, fgColorMode, fgColor, false, bold, excludeFromContrastRatioDemands);
+    const minimumContrastColor = this._getMinimumContrastColor(bg, bgColorMode, bgColor, fg, fgColorMode, fgColor, inverse, bold, dim, excludeFromContrastRatioDemands);
     if (minimumContrastColor) {
       return minimumContrastColor;
     }
@@ -390,23 +384,26 @@ export class TextureAtlas implements ITextureAtlas {
     }
   }
 
-  private _getMinimumContrastColor(bg: number, bgColorMode: number, bgColor: number, fg: number, fgColorMode: number, fgColor: number, inverse: boolean, bold: boolean, excludeFromContrastRatioDemands: boolean): IColor | undefined {
+  private _getMinimumContrastColor(bg: number, bgColorMode: number, bgColor: number, fg: number, fgColorMode: number, fgColor: number, inverse: boolean, bold: boolean, dim: boolean, excludeFromContrastRatioDemands: boolean): IColor | undefined {
     if (this._config.minimumContrastRatio === 1 || excludeFromContrastRatioDemands) {
       return undefined;
     }
 
     // Try get from cache first
-    const adjustedColor = this._config.colors.contrastCache.getColor(bg, fg);
+    const cache = this._getContrastCache(dim);
+    const adjustedColor = cache.getColor(bg, fg);
     if (adjustedColor !== undefined) {
       return adjustedColor || undefined;
     }
 
     const bgRgba = this._resolveBackgroundRgba(bgColorMode, bgColor, inverse);
     const fgRgba = this._resolveForegroundRgba(fgColorMode, fgColor, inverse, bold);
-    const result = rgba.ensureContrastRatio(bgRgba, fgRgba, this._config.minimumContrastRatio);
+    // Dim cells only require half the contrast, otherwise they wouldn't be distinguishable from
+    // non-dim cells
+    const result = rgba.ensureContrastRatio(bgRgba, fgRgba, this._config.minimumContrastRatio / (dim ? 2 : 1));
 
     if (!result) {
-      this._config.colors.contrastCache.setColor(bg, fg, null);
+      cache.setColor(bg, fg, null);
       return undefined;
     }
 
@@ -415,12 +412,20 @@ export class TextureAtlas implements ITextureAtlas {
       (result >> 16) & 0xFF,
       (result >> 8) & 0xFF
     );
-    this._config.colors.contrastCache.setColor(bg, fg, color);
+    cache.setColor(bg, fg, color);
 
     return color;
   }
 
-  private _drawToCache(codeOrChars: number | string, bg: number, fg: number, ext: number): IRasterizedGlyph {
+  private _getContrastCache(dim: boolean): IColorContrastCache {
+    if (dim) {
+      return this._config.colors.halfContrastCache;
+    }
+    return this._config.colors.contrastCache;
+  }
+
+  @traceCall
+  private _drawToCache(codeOrChars: number | string, bg: number, fg: number, ext: number, restrictToCellHeight: boolean = false): IRasterizedGlyph {
     const chars = typeof codeOrChars === 'number' ? String.fromCharCode(codeOrChars) : codeOrChars;
 
     // Uncomment for debugging
@@ -429,12 +434,12 @@ export class TextureAtlas implements ITextureAtlas {
     // Allow 1 cell width per character, with a minimum of 2 (CJK), plus some padding. This is used
     // to draw the glyph to the canvas as well as to restrict the bounding box search to ensure
     // giant ligatures (eg. =====>) don't impact overall performance.
-    const allowedWidth = this._config.deviceCellWidth * Math.max(chars.length, 2) + TMP_CANVAS_GLYPH_PADDING * 2;
+    const allowedWidth = Math.min(this._config.deviceCellWidth * Math.max(chars.length, 2) + TMP_CANVAS_GLYPH_PADDING * 2, this._textureSize);
     if (this._tmpCanvas.width < allowedWidth) {
       this._tmpCanvas.width = allowedWidth;
     }
     // Include line height when drawing glyphs
-    const allowedHeight = this._config.deviceCellHeight + TMP_CANVAS_GLYPH_PADDING * 4;
+    const allowedHeight = Math.min(this._config.deviceCellHeight + TMP_CANVAS_GLYPH_PADDING * 4, this._textureSize);
     if (this._tmpCanvas.height < allowedHeight) {
       this._tmpCanvas.height = allowedHeight;
     }
@@ -455,6 +460,7 @@ export class TextureAtlas implements ITextureAtlas {
     const italic = !!this._workAttributeData.isItalic();
     const underline = !!this._workAttributeData.isUnderline();
     const strikethrough = !!this._workAttributeData.isStrikethrough();
+    const overline = !!this._workAttributeData.isOverline();
     let fgColor = this._workAttributeData.getFgColor();
     let fgColorMode = this._workAttributeData.getFgColorMode();
     let bgColor = this._workAttributeData.getBgColor();
@@ -470,8 +476,8 @@ export class TextureAtlas implements ITextureAtlas {
 
     // draw the background
     const backgroundColor = this._getBackgroundColor(bgColorMode, bgColor, inverse, dim);
-    // Use a 'copy' composite operation to clear any existing glyph out of _tmpCtxWithAlpha, regardless of
-    // transparency in backgroundColor
+    // Use a 'copy' composite operation to clear any existing glyph out of _tmpCtxWithAlpha,
+    // regardless of transparency in backgroundColor
     this._tmpCtx.globalCompositeOperation = 'copy';
     this._tmpCtx.fillStyle = backgroundColor.css;
     this._tmpCtx.fillRect(0, 0, this._tmpCanvas.width, this._tmpCanvas.height);
@@ -536,9 +542,9 @@ export class TextureAtlas implements ITextureAtlas {
       // Underline style/stroke
       this._tmpCtx.beginPath();
       const xLeft = padding;
-      const yTop = Math.ceil(padding + this._config.deviceCharHeight) - yOffset;
-      const yMid = padding + this._config.deviceCharHeight + lineWidth - yOffset;
-      const yBot = Math.ceil(padding + this._config.deviceCharHeight + lineWidth * 2) - yOffset;
+      const yTop = Math.ceil(padding + this._config.deviceCharHeight) - yOffset - (restrictToCellHeight ? lineWidth * 2 : 0);
+      const yMid = yTop + lineWidth;
+      const yBot = yTop + lineWidth * 2;
 
       for (let i = 0; i < chWidth; i++) {
         this._tmpCtx.save();
@@ -563,7 +569,8 @@ export class TextureAtlas implements ITextureAtlas {
             const clipRegion = new Path2D();
             clipRegion.rect(xChLeft, yTop, this._config.deviceCellWidth, yBot - yTop);
             this._tmpCtx.clip(clipRegion);
-            // Start 1/2 cell before and end 1/2 cells after to ensure a smooth curve with other cells
+            // Start 1/2 cell before and end 1/2 cells after to ensure a smooth curve with other
+            // cells
             this._tmpCtx.moveTo(xChLeft - this._config.deviceCellWidth / 2, yMid);
             this._tmpCtx.bezierCurveTo(
               xChLeft - this._config.deviceCellWidth / 2, yCurlyTop,
@@ -638,12 +645,24 @@ export class TextureAtlas implements ITextureAtlas {
       }
     }
 
+    // Overline
+    if (overline) {
+      const lineWidth = Math.max(1, Math.floor(this._config.fontSize * this._config.devicePixelRatio / 15));
+      const yOffset = lineWidth % 2 === 1 ? 0.5 : 0;
+      this._tmpCtx.lineWidth = lineWidth;
+      this._tmpCtx.strokeStyle = this._tmpCtx.fillStyle;
+      this._tmpCtx.beginPath();
+      this._tmpCtx.moveTo(padding, padding + yOffset);
+      this._tmpCtx.lineTo(padding + this._config.deviceCharWidth * chWidth, padding + yOffset);
+      this._tmpCtx.stroke();
+    }
+
     // Draw the character
     if (!customGlyph) {
       this._tmpCtx.fillText(chars, padding, padding + this._config.deviceCharHeight);
     }
 
-    // If this charcater is underscore and beyond the cell bounds, shift it up until it is visible
+    // If this character is underscore and beyond the cell bounds, shift it up until it is visible
     // even on the bottom row, try for a maximum of 5 pixels.
     if (chars === '_' && !this._config.allowTransparency) {
       let isBeyondCellBounds = clearColor(this._tmpCtx.getImageData(padding, padding, this._config.deviceCellWidth, this._config.deviceCellHeight), backgroundColor, foregroundColor, enableClearThresholdCheck);
@@ -735,13 +754,13 @@ export class TextureAtlas implements ITextureAtlas {
         }
       }
 
-      // Create a new one if too much vertical space would be wasted or there is not enough room
+      // Create a new page if too much vertical space would be wasted or there is not enough room
       // left in the page. The previous active row will become fixed in the process as it now has a
       // fixed height
       if (activeRow.y + rasterizedGlyph.size.y >= activePage.canvas.height || activeRow.height > rasterizedGlyph.size.y + Constants.ROW_PIXEL_THRESHOLD) {
         // Create the new fixed height row, creating a new page if there isn't enough room on the
         // current page
-        let wasNewPageCreated = false;
+        let wasPageAndRowFound = false;
         if (activePage.currentRow.y + activePage.currentRow.height + rasterizedGlyph.size.y >= activePage.canvas.height) {
           // Find the first page with room to create the new row on
           let candidatePage: AtlasPage | undefined;
@@ -754,15 +773,30 @@ export class TextureAtlas implements ITextureAtlas {
           if (candidatePage) {
             activePage = candidatePage;
           } else {
-            // Create a new page if there is no room
-            const newPage = this._createNewPage();
-            activePage = newPage;
-            activeRow = newPage.currentRow;
-            activeRow.height = rasterizedGlyph.size.y;
-            wasNewPageCreated = true;
+            // Before creating a new atlas page that would trigger a page merge, check if the
+            // current active row is sufficient when ignoring the ROW_PIXEL_THRESHOLD. This will
+            // improve texture utilization by using the available space before the page is merged
+            // and becomes static.
+            if (
+              TextureAtlas.maxAtlasPages &&
+              this._pages.length >= TextureAtlas.maxAtlasPages &&
+              activeRow.y + rasterizedGlyph.size.y <= activePage.canvas.height &&
+              activeRow.height >= rasterizedGlyph.size.y &&
+              activeRow.x + rasterizedGlyph.size.x <= activePage.canvas.width
+            ) {
+              // activePage and activeRow is already valid
+              wasPageAndRowFound = true;
+            } else {
+              // Create a new page if there is no room
+              const newPage = this._createNewPage();
+              activePage = newPage;
+              activeRow = newPage.currentRow;
+              activeRow.height = rasterizedGlyph.size.y;
+              wasPageAndRowFound = true;
+            }
           }
         }
-        if (!wasNewPageCreated) {
+        if (!wasPageAndRowFound) {
           // Fix the current row as the new row is being added below
           if (activePage.currentRow.height > 0) {
             activePage.fixedRows.push(activePage.currentRow);

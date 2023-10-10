@@ -1,7 +1,7 @@
 {
   "env": {
     "browser": true,
-    "es6": true,
+    "es2021": true,
     "node": true
   },
   "parser": "@typescript-eslint/parser",
@@ -13,11 +13,15 @@
       "src/headless/tsconfig.json",
       "test/api/tsconfig.json",
       "test/benchmark/tsconfig.json",
+      "test/playwright/tsconfig.json",
       "addons/xterm-addon-attach/src/tsconfig.json",
       "addons/xterm-addon-attach/test/tsconfig.json",
       "addons/xterm-addon-canvas/src/tsconfig.json",
+      "addons/xterm-addon-canvas/test/tsconfig.json",
       "addons/xterm-addon-fit/src/tsconfig.json",
       "addons/xterm-addon-fit/test/tsconfig.json",
+      "addons/xterm-addon-image/src/tsconfig.json",
+      "addons/xterm-addon-image/test/tsconfig.json",
       "addons/xterm-addon-ligatures/src/tsconfig.json",
       "addons/xterm-addon-search/src/tsconfig.json",
       "addons/xterm-addon-search/test/tsconfig.json",
@@ -26,6 +30,9 @@
       "addons/xterm-addon-serialize/benchmark/tsconfig.json",
       "addons/xterm-addon-unicode11/src/tsconfig.json",
       "addons/xterm-addon-unicode11/test/tsconfig.json",
+      "addons/xterm-addon-unicode-graphemes/src/tsconfig.json",
+      "addons/xterm-addon-unicode-graphemes/test/tsconfig.json",
+      "addons/xterm-addon-unicode-graphemes/benchmark/tsconfig.json",
       "addons/xterm-addon-web-links/src/tsconfig.json",
       "addons/xterm-addon-web-links/test/tsconfig.json",
       "addons/xterm-addon-webgl/src/tsconfig.json",
@@ -34,6 +41,8 @@
     "sourceType": "module"
   },
   "ignorePatterns": [
+    "addons/*/src/third-party/*.ts",
+    "**/inwasm-sdks/*",
     "**/typings/*.d.ts",
     "**/node_modules",
     "**/*.js"
@@ -87,7 +96,12 @@
     ],
     "@typescript-eslint/naming-convention": [
       "warn",
-      { "selector": "default", "format": ["camelCase"] },
+      { "selector": "default", "format": ["camelCase"],
+        "filter": {
+          "regex": "^[a-z]",
+          "match": true
+        }
+      },
       // variableLike
       { "selector": "variable", "format": ["camelCase", "UPPER_CASE"] },
       { "selector": "variable", "filter": "^I.+Service$", "format": ["PascalCase"], "prefix": ["I"] },
@@ -96,7 +110,12 @@
       { "selector": "memberLike", "modifiers": ["protected"], "format": ["camelCase"], "leadingUnderscore": "require" },
       { "selector": "enumMember", "format": ["UPPER_CASE"] },
       // memberLike - Allow enum-like objects to use UPPER_CASE
-      { "selector": "property", "modifiers": ["public"], "format": ["camelCase", "UPPER_CASE"] },
+      { "selector": "property", "modifiers": ["public"], "format": ["camelCase", "UPPER_CASE"],
+        "filter": {
+          "regex": "^[a-z]",
+          "match": true
+        }
+      },
       // restrict on* naming for events only
       { "selector": "method", "modifiers": ["public"], "format": ["camelCase", "UPPER_CASE"], "custom": {
         "regex": "^on[A-Z].+",
@@ -114,6 +133,11 @@
       { "selector": "typeLike", "format": ["PascalCase"] },
       { "selector": "interface", "format": ["PascalCase"], "prefix": ["I"] }
     ],
+    "@typescript-eslint/no-confusing-void-expression": [
+      "warn",
+      { "ignoreArrowShorthand": true }
+    ],
+    "@typescript-eslint/no-useless-constructor": "warn",
     "@typescript-eslint/prefer-namespace-keyword": "warn",
     "@typescript-eslint/type-annotation-spacing": "warn",
     "@typescript-eslint/quotes": [
@@ -146,6 +170,16 @@
     "jsdoc/check-param-names": 1,
     "jsdoc/no-multi-asterisks": 1,
     "keyword-spacing": "warn",
+    "max-len": [
+      "warn",
+      {
+        "code": 1000, // Don't enforce for code
+        "comments": 100,
+        "ignoreTrailingComments": true,
+        "ignoreUrls": true,
+        "ignorePattern": "^ *((?<vt_comment>(//|\\*) @vt)|(?<table_comment>\\* \\| )|(?<commented_code>//  ))"
+      }
+    ],
     "new-parens": "warn",
     "no-duplicate-imports": "warn",
     "no-else-return": [
@@ -189,6 +223,10 @@
     ],
     "no-trailing-spaces": "warn",
     "no-unsafe-finally": "warn",
+    "no-unused-vars": ["warn", {
+      "vars": "all",
+      "args": "none"
+    }],
     "no-var": "warn",
     "one-var": [
       "warn",
@@ -210,9 +248,14 @@
   },
   "overrides": [
     {
-      "files": ["**/*.test.ts"],
+      "files": [
+        "**/*.api.ts",
+        "**/*.test.ts"
+      ],
       "rules": {
-        "object-curly-spacing": "off"
+        "object-curly-spacing": "off",
+        "max-len": "off",
+        "no-unused-vars": "off"
       }
     }
   ]

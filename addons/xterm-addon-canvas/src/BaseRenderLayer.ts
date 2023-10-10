@@ -3,24 +3,24 @@
  * @license MIT
  */
 
+import { ReadonlyColorSet } from 'browser/Types';
+import { CellColorResolver } from 'browser/renderer/shared/CellColorResolver';
 import { acquireTextureAtlas } from 'browser/renderer/shared/CharAtlasCache';
 import { TEXT_BASELINE } from 'browser/renderer/shared/Constants';
 import { tryDrawCustomChar } from 'browser/renderer/shared/CustomGlyphs';
 import { throwIfFalsy } from 'browser/renderer/shared/RendererUtils';
-import { IRasterizedGlyph, IRenderDimensions, ISelectionRenderModel, ITextureAtlas } from 'browser/renderer/shared/Types';
 import { createSelectionRenderModel } from 'browser/renderer/shared/SelectionRenderModel';
+import { IRasterizedGlyph, IRenderDimensions, ISelectionRenderModel, ITextureAtlas } from 'browser/renderer/shared/Types';
 import { ICoreBrowserService, IThemeService } from 'browser/services/Services';
-import { ReadonlyColorSet } from 'browser/Types';
+import { EventEmitter, forwardEvent } from 'common/EventEmitter';
+import { Disposable, MutableDisposable, toDisposable } from 'common/Lifecycle';
+import { isSafari } from 'common/Platform';
+import { ICellData } from 'common/Types';
 import { CellData } from 'common/buffer/CellData';
 import { WHITESPACE_CELL_CODE } from 'common/buffer/Constants';
 import { IBufferService, IDecorationService, IOptionsService } from 'common/services/Services';
-import { ICellData, IDisposable } from 'common/Types';
 import { Terminal } from 'xterm';
 import { IRenderLayer } from './Types';
-import { CellColorResolver } from 'browser/renderer/shared/CellColorResolver';
-import { Disposable, toDisposable } from 'common/Lifecycle';
-import { isSafari } from 'common/Platform';
-import { EventEmitter, forwardEvent } from 'common/EventEmitter';
 
 export abstract class BaseRenderLayer extends Disposable implements IRenderLayer {
   private _canvas: HTMLCanvasElement;
@@ -37,7 +37,7 @@ export abstract class BaseRenderLayer extends Disposable implements IRenderLayer
   private _bitmapGenerator: (BitmapGenerator | undefined)[] = [];
 
   protected _charAtlas!: ITextureAtlas;
-  private _charAtlasDisposable?: IDisposable;
+  protected _charAtlasDisposable = this.register(new MutableDisposable());
 
   public get canvas(): HTMLCanvasElement { return this._canvas; }
   public get cacheCanvas(): HTMLCanvasElement { return this._charAtlas?.pages[0].canvas!; }
@@ -74,7 +74,6 @@ export abstract class BaseRenderLayer extends Disposable implements IRenderLayer
 
     this.register(toDisposable(() => {
       this._canvas.remove();
-      this._charAtlas?.dispose();
     }));
   }
 
@@ -122,9 +121,8 @@ export abstract class BaseRenderLayer extends Disposable implements IRenderLayer
     if (this._deviceCharWidth <= 0 && this._deviceCharHeight <= 0) {
       return;
     }
-    this._charAtlasDisposable?.dispose();
     this._charAtlas = acquireTextureAtlas(this._terminal, this._optionsService.rawOptions, colorSet, this._deviceCellWidth, this._deviceCellHeight, this._deviceCharWidth, this._deviceCharHeight, this._coreBrowserService.dpr);
-    this._charAtlasDisposable = forwardEvent(this._charAtlas.onAddTextureAtlasCanvas, this._onAddTextureAtlasCanvas);
+    this._charAtlasDisposable.value = forwardEvent(this._charAtlas.onAddTextureAtlasCanvas, this._onAddTextureAtlasCanvas);
     this._charAtlas.warmUp();
     for (let i = 0; i < this._charAtlas.pages.length; i++) {
       this._bitmapGenerator[i] = new BitmapGenerator(this._charAtlas.pages[i].canvas);
@@ -368,18 +366,33 @@ export abstract class BaseRenderLayer extends Disposable implements IRenderLayer
   protected _drawChars(cell: ICellData, x: number, y: number): void {
     const chars = cell.getChars();
     this._cellColorResolver.resolve(cell, x, this._bufferService.buffer.ydisp + y);
+
+    if (!this._charAtlas) {
+      return;
+    }
+
     let glyph: IRasterizedGlyph;
     if (chars && chars.length > 1) {
-      glyph = this._charAtlas.getRasterizedGlyphCombinedChar(chars, this._cellColorResolver.result.bg, this._cellColorResolver.result.fg, this._cellColorResolver.result.ext);
+      glyph = this._charAtlas.getRasterizedGlyphCombinedChar(chars, this._cellColorResolver.result.bg, this._cellColorResolver.result.fg, this._cellColorResolver.result.ext, true);
     } else {
-      glyph = this._charAtlas.getRasterizedGlyph(cell.getCode() || WHITESPACE_CELL_CODE, this._cellColorResolver.result.bg, this._cellColorResolver.result.fg, this._cellColorResolver.result.ext);
+      glyph = this._charAtlas.getRasterizedGlyph(cell.getCode() || WHITESPACE_CELL_CODE, this._cellColorResolver.result.bg, this._cellColorResolver.result.fg, this._cellColorResolver.result.ext, true);
     }
     if (!glyph.size.x || !glyph.size.y) {
       return;
     }
     this._ctx.save();
     this._clipRow(y);
+
     // Draw the image, use the bitmap if it's available
+
+    // HACK: If the canvas doesn't match, delete the generator. It's not clear how this happens but
+    // something is wrong with either the lifecycle of _bitmapGenerator or the page canvases are
+    // swapped out unexpectedly
+    if (this._bitmapGenerator[glyph.texturePage] && this._charAtlas.pages[glyph.texturePage].canvas !== this._bitmapGenerator[glyph.texturePage]!.canvas) {
+      this._bitmapGenerator[glyph.texturePage]?.bitmap?.close();
+      delete this._bitmapGenerator[glyph.texturePage];
+    }
+
     if (this._charAtlas.pages[glyph.texturePage].version !== this._bitmapGenerator[glyph.texturePage]?.version) {
       if (!this._bitmapGenerator[glyph.texturePage]) {
         this._bitmapGenerator[glyph.texturePage] = new BitmapGenerator(this._charAtlas.pages[glyph.texturePage].canvas);
@@ -446,11 +459,12 @@ class BitmapGenerator {
   public get bitmap(): ImageBitmap | undefined { return this._bitmap; }
   public version: number = -1;
 
-  constructor(private readonly _canvas: HTMLCanvasElement) {
+  constructor(public readonly canvas: HTMLCanvasElement) {
   }
 
   public refresh(): void {
     // Clear the bitmap immediately as it's stale
+    this._bitmap?.close();
     this._bitmap = undefined;
     // Disable ImageBitmaps on Safari because of https://bugs.webkit.org/show_bug.cgi?id=149990
     if (isSafari) {
@@ -466,9 +480,10 @@ class BitmapGenerator {
 
   private _generate(): void {
     if (this._state === BitmapGeneratorState.IDLE) {
+      this._bitmap?.close();
       this._bitmap = undefined;
       this._state = BitmapGeneratorState.GENERATING;
-      window.createImageBitmap(this._canvas).then(bitmap => {
+      window.createImageBitmap(this.canvas).then(bitmap => {
         if (this._state === BitmapGeneratorState.GENERATING_INVALID) {
           this.refresh();
         } else {

@@ -5,9 +5,9 @@
  * (EXPERIMENTAL) This Addon is still under development
  */
 
-import { Terminal, ITerminalAddon, IBuffer, IBufferCell, IBufferRange } from 'xterm';
-import { IColorSet } from 'browser/Types';
-import { IAttributeData } from 'common/Types';
+import { DEFAULT_ANSI_COLORS } from 'browser/services/ThemeService';
+import { IAttributeData, IColor } from 'common/Types';
+import { IBuffer, IBufferCell, IBufferRange, ITerminalAddon, Terminal } from 'xterm';
 
 function constrain(value: number, low: number, high: number): number {
   return Math.max(low, Math.min(value, high));
@@ -77,6 +77,7 @@ function equalFlags(cell1: IBufferCell | IAttributeData, cell2: IBufferCell): bo
   return cell1.isInverse() === cell2.isInverse()
     && cell1.isBold() === cell2.isBold()
     && cell1.isUnderline() === cell2.isUnderline()
+    && cell1.isOverline() === cell2.isOverline()
     && cell1.isBlink() === cell2.isBlink()
     && cell1.isInvisible() === cell2.isInvisible()
     && cell1.isItalic() === cell2.isItalic()
@@ -129,7 +130,8 @@ class StringSerializeHandler extends BaseSerializeHandler {
   private _thisRowLastSecondChar: IBufferCell = this._buffer.getNullCell();
   private _nextRowFirstChar: IBufferCell = this._buffer.getNullCell();
   protected _rowEnd(row: number, isLastRow: boolean): void {
-    // if there is colorful empty cell at line end, whe must pad it back, or the the color block will missing
+    // if there is colorful empty cell at line end, whe must pad it back, or the the color block
+    // will missing
     if (this._nullCellCount > 0 && !equalBg(this._cursorStyle, this._backgroundCell)) {
       // use clear right to set background.
       this._currentRow += `\u001b[${this._nullCellCount}X`;
@@ -264,6 +266,7 @@ class StringSerializeHandler extends BaseSerializeHandler {
           if (cell.isInverse() !== oldCell.isInverse()) { sgrSeq.push(cell.isInverse() ? 7 : 27); }
           if (cell.isBold() !== oldCell.isBold()) { sgrSeq.push(cell.isBold() ? 1 : 22); }
           if (cell.isUnderline() !== oldCell.isUnderline()) { sgrSeq.push(cell.isUnderline() ? 4 : 24); }
+          if (cell.isOverline() !== oldCell.isOverline()) { sgrSeq.push(cell.isOverline() ? 53 : 55); }
           if (cell.isBlink() !== oldCell.isBlink()) { sgrSeq.push(cell.isBlink() ? 5 : 25); }
           if (cell.isInvisible() !== oldCell.isInvisible()) { sgrSeq.push(cell.isInvisible() ? 8 : 28); }
           if (cell.isItalic() !== oldCell.isItalic()) { sgrSeq.push(cell.isItalic() ? 3 : 23); }
@@ -289,7 +292,8 @@ class StringSerializeHandler extends BaseSerializeHandler {
 
     const sgrSeq = this._diffStyle(cell, this._cursorStyle);
 
-    // the empty cell style is only assumed to be changed when background changed, because foreground is always 0.
+    // the empty cell style is only assumed to be changed when background changed, because
+    // foreground is always 0.
     const styleChanged = isEmptyCell ? !equalBg(this._cursorStyle, cell) : sgrSeq.length > 0;
 
     /**
@@ -409,8 +413,6 @@ class StringSerializeHandler extends BaseSerializeHandler {
 
 export class SerializeAddon implements ITerminalAddon {
   private _terminal: Terminal | undefined;
-
-  constructor() { }
 
   public activate(terminal: Terminal): void {
     this._terminal = terminal;
@@ -534,7 +536,7 @@ export class HTMLSerializeHandler extends BaseSerializeHandler {
 
   private _htmlContent = '';
 
-  private _colors: IColorSet;
+  private _ansiColors: Readonly<IColor[]>;
 
   constructor(
     buffer: IBuffer,
@@ -543,8 +545,13 @@ export class HTMLSerializeHandler extends BaseSerializeHandler {
   ) {
     super(buffer);
 
-    // https://github.com/xtermjs/xterm.js/issues/3601
-    this._colors = (_terminal as any)._core._themeService.colors;
+    // For xterm headless: fallback to ansi colors
+    if ((_terminal as any)._core._themeService) {
+      this._ansiColors = (_terminal as any)._core._themeService.colors.ansi;
+    }
+    else {
+      this._ansiColors = DEFAULT_ANSI_COLORS;
+    }
   }
 
   private _padStart(target: string, targetLength: number, padString: string): string {
@@ -600,7 +607,7 @@ export class HTMLSerializeHandler extends BaseSerializeHandler {
       return rgb.map(x => this._padStart(x.toString(16), 2, '0')).join('');
     }
     if (isFg ? cell.isFgPalette() : cell.isBgPalette()) {
-      return this._colors.ansi[color].css;
+      return this._ansiColors[color].css;
     }
     return undefined;
   }
@@ -625,7 +632,9 @@ export class HTMLSerializeHandler extends BaseSerializeHandler {
 
       if (cell.isInverse()) { content.push('color: #000000; background-color: #BFBFBF;'); }
       if (cell.isBold()) { content.push('font-weight: bold;'); }
-      if (cell.isUnderline()) { content.push('text-decoration: underline;'); }
+      if (cell.isUnderline() && cell.isOverline()) { content.push('text-decoration: overline underline;'); }
+      else if (cell.isUnderline()) { content.push('text-decoration: underline;'); }
+      else if (cell.isOverline()) { content.push('text-decoration: overline;'); }
       if (cell.isBlink()) { content.push('text-decoration: blink;'); }
       if (cell.isInvisible()) { content.push('visibility: hidden;'); }
       if (cell.isItalic()) { content.push('font-style: italic;'); }

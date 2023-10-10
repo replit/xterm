@@ -14,16 +14,16 @@
   <body>
     <h1 style="color: #2D2E2C">xterm.js: A terminal for the <em style="color: #5DA5D5">web</em></h1>
     <div id="container">
-      <div id="grid">
+      <div class="grid">
         <div id="terminal-container"></div>
       </div>
-      <div id="grid">
+      <div class="grid">
         <div class="tab">
-          <button id= "optionsbutton" class="tabLinks" onclick="openSection(event, 'options')">Options</button>
-          <button id= "addonsbutton" class="tabLinks" onclick="openSection(event, 'addons')">Addons</button>
-          <button id= "stylebutton" class="tabLinks" onclick="openSection(event, 'style')">Style</button>
-          <button id= "testbutton" class="tabLinks" onclick="openSection(event, 'test')">Test</button>
-          <button id= "vtbutton" class="tabLinks" onclick="openSection(event, 'vt')">VT</button>
+          <button id="optionsbutton" class="tabLinks" onclick="openSection(event, 'options')">Options</button>
+          <button id="addonsbutton" class="tabLinks" onclick="openSection(event, 'addons')">Addons</button>
+          <button id="stylebutton" class="tabLinks" onclick="openSection(event, 'style')">Style</button>
+          <button id="testbutton" class="tabLinks" onclick="openSection(event, 'test')">Test</button>
+          <button id="vtbutton" class="tabLinks" onclick="openSection(event, 'vt')">VT</button>
         </div>
         <div id="options" class="tabContent">
           <h3>Options</h3>
@@ -55,6 +55,19 @@
             <span id="htmlserialize-output-result"></span>
             <div><pre id="htmlserialize-output"></pre></div>
           </div>
+          <h4>Image Addon</h4>
+          <details>
+            <summary>image addon settings</summary>
+            <div>
+              <label>Storage Limit (in MB) <input type="number" id="image-storagelimit"/></label><br/>
+              <label>Show Placeholder <input type="checkbox" id="image-showplaceholder"/></label>
+              <br/><br/>
+              <label>
+                Ctor options (applied on addon relaunch)<br/>
+                <textarea id="image-options" cols="40" rows="12"></textarea>
+              </label>
+            </div>
+          </details>
         </div>
         <div id="style" class="tabContent">
           <h3>Style</h3>
@@ -83,6 +96,8 @@
 	            <dd><button id="sgr-test" title="Write text with SGR attribute">SGR test</button></dd>
 	            <dd><button id="ansi-colors" title="Write a wide range of ansi colors">Ansi colors test</button></dd>
 	            <dd><button id="osc-hyperlinks" title="Write some OSC 8 hyperlinks">Ansi hyperlinks test</button></dd>
+              <dd><button id="bce" title="Test colored erase">Colored Erase (BCE)</button></dd>
+              <dd><button id="add-grapheme-clusters" title="Write grapheme cluster test strings">Grapheme clusters</button></dd>
 
               <dt>Decorations</dt>
               <dd><button id="add-decoration" title="Add a decoration to the terminal">Decoration</button></dd>
@@ -90,6 +105,15 @@
 
               <dt>Weblinks Addon</dt>
               <dd><button id="weblinks-test" title="Various url conditions from demo data, hover&click to test">Test URLs</button></dd>
+
+              <dt>Image Test</dt>
+              <dd><button id="image-demo1">snake (sixel)</button></dd>
+              <dd><button id="image-demo2">oranges (sixel)</button></dd>
+              <dd><button id="image-demo3">palette (iip)</button></dd>
+
+              <dt>Events Test</dt>
+              <dd><button id="event-focus">focus</button></dd>
+              <dd><button id="event-blur">blur</button></dd>
             </dl>
           </div>
         </div>
@@ -99,9 +123,11 @@
         </div>
       </div>
     </div>
-    <input type="checkbox" id="texture-atlas-zoom"/>
-    <label for="texture-atlas-zoom">Zoom texture atlas</label>
-    <div id="texture-atlas"></div>
+    <div id="texture-atlas-container">
+      <input type="checkbox" id="texture-atlas-zoom"/>
+      <label for="texture-atlas-zoom">Zoom texture atlas</label>
+      <div id="texture-atlas"></div>
+    </div>
       <script src="dist/client-bundle.js" defer ></script>
       <script>
       var tab = localStorage.getItem("tab");

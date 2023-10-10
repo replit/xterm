@@ -3,12 +3,12 @@
  * @license MIT
  */
 
-import { IBufferService, IOptionsService } from 'common/services/Services';
-import { BufferSet } from 'common/buffer/BufferSet';
-import { IBufferSet, IBuffer } from 'common/buffer/Types';
-import { EventEmitter, IEventEmitter, IEvent } from 'common/EventEmitter';
+import { EventEmitter } from 'common/EventEmitter';
 import { Disposable } from 'common/Lifecycle';
 import { IAttributeData, IBufferLine, ScrollSource } from 'common/Types';
+import { BufferSet } from 'common/buffer/BufferSet';
+import { IBuffer, IBufferSet } from 'common/buffer/Types';
+import { IBufferService, IOptionsService } from 'common/services/Services';
 
 export const MINIMUM_COLS = 2; // Less than 2 can mess with wide chars
 export const MINIMUM_ROWS = 1;
@@ -43,7 +43,8 @@ export class BufferService extends Disposable implements IBufferService {
     this.cols = cols;
     this.rows = rows;
     this.buffers.resize(cols, rows);
-    // TODO: This doesn't fire when scrollback changes - add a resize event to BufferSet and forward event
+    // TODO: This doesn't fire when scrollback changes - add a resize event to BufferSet and forward
+    //       event
     this._onResize.fire({ cols, rows });
   }
 
@@ -145,35 +146,6 @@ export class BufferService extends Disposable implements IBufferService {
 
     if (!suppressScrollEvent) {
       this._onScroll.fire(buffer.ydisp);
-    }
-  }
-
-  /**
-   * Scroll the display of the terminal by a number of pages.
-   * @param pageCount The number of pages to scroll (negative scrolls up).
-   */
-  public scrollPages(pageCount: number): void {
-    this.scrollLines(pageCount * (this.rows - 1));
-  }
-
-  /**
-   * Scrolls the display of the terminal to the top.
-   */
-  public scrollToTop(): void {
-    this.scrollLines(-this.buffer.ydisp);
-  }
-
-  /**
-   * Scrolls the display of the terminal to the bottom.
-   */
-  public scrollToBottom(): void {
-    this.scrollLines(this.buffer.ybase - this.buffer.ydisp);
-  }
-
-  public scrollToLine(line: number): void {
-    const scrollAmount = line - this.buffer.ydisp;
-    if (scrollAmount !== 0) {
-      this.scrollLines(scrollAmount);
     }
   }
 }

@@ -4,17 +4,17 @@
  */
 
 import { CircularList, IInsertEvent } from 'common/CircularList';
-import { IBuffer } from 'common/buffer/Types';
-import { IBufferLine, ICellData, IAttributeData, ICharset } from 'common/Types';
-import { BufferLine, DEFAULT_ATTR_DATA } from 'common/buffer/BufferLine';
-import { CellData } from 'common/buffer/CellData';
-import { NULL_CELL_CHAR, NULL_CELL_WIDTH, NULL_CELL_CODE, WHITESPACE_CELL_CHAR, WHITESPACE_CELL_WIDTH, WHITESPACE_CELL_CODE, CHAR_DATA_WIDTH_INDEX, CHAR_DATA_CHAR_INDEX } from 'common/buffer/Constants';
-import { reflowLargerApplyNewLayout, reflowLargerCreateNewLayout, reflowLargerGetLinesToRemove, reflowSmallerGetNewLineLengths, getWrappedLineTrimmedLength } from 'common/buffer/BufferReflow';
-import { Marker } from 'common/buffer/Marker';
-import { IOptionsService, IBufferService } from 'common/services/Services';
-import { DEFAULT_CHARSET } from 'common/data/Charsets';
-import { ExtendedAttrs } from 'common/buffer/AttributeData';
 import { IdleTaskQueue } from 'common/TaskQueue';
+import { IAttributeData, IBufferLine, ICellData, ICharset } from 'common/Types';
+import { ExtendedAttrs } from 'common/buffer/AttributeData';
+import { BufferLine, DEFAULT_ATTR_DATA } from 'common/buffer/BufferLine';
+import { getWrappedLineTrimmedLength, reflowLargerApplyNewLayout, reflowLargerCreateNewLayout, reflowLargerGetLinesToRemove, reflowSmallerGetNewLineLengths } from 'common/buffer/BufferReflow';
+import { CellData } from 'common/buffer/CellData';
+import { NULL_CELL_CHAR, NULL_CELL_CODE, NULL_CELL_WIDTH, WHITESPACE_CELL_CHAR, WHITESPACE_CELL_CODE, WHITESPACE_CELL_WIDTH } from 'common/buffer/Constants';
+import { Marker } from 'common/buffer/Marker';
+import { IBuffer } from 'common/buffer/Types';
+import { DEFAULT_CHARSET } from 'common/data/Charsets';
+import { IBufferService, IOptionsService } from 'common/services/Services';
 
 export const MAX_BUFFER_SIZE = 4294967295; // 2^32 - 1
 
@@ -177,7 +177,7 @@ export class Buffer implements IBuffer {
       if (this._rows < newRows) {
         for (let y = this._rows; y < newRows; y++) {
           if (this.lines.length < newRows + this.ybase) {
-            if (this._optionsService.rawOptions.windowsMode) {
+            if (this._optionsService.rawOptions.windowsMode || this._optionsService.rawOptions.windowsPty.backend !== undefined || this._optionsService.rawOptions.windowsPty.buildNumber !== undefined) {
               // Just add the new missing rows on Windows as conpty reprints the screen with it's
               // view of the world. Once a line enters scrollback for conpty it remains there
               this.lines.push(new BufferLine(newCols, nullCell));
@@ -270,8 +270,8 @@ export class Buffer implements IBuffer {
   private _batchedMemoryCleanup(): boolean {
     let normalRun = true;
     if (this._memoryCleanupPosition >= this.lines.length) {
-      // cleanup made it once through all lines, thus rescan in loop below to also catch shifted lines,
-      // which should finish rather quick if there are no more cleanups pending
+      // cleanup made it once through all lines, thus rescan in loop below to also catch shifted
+      // lines, which should finish rather quick if there are no more cleanups pending
       this._memoryCleanupPosition = 0;
       normalRun = false;
     }
@@ -290,6 +290,10 @@ export class Buffer implements IBuffer {
   }
 
   private get _isReflowEnabled(): boolean {
+    const windowsPty = this._optionsService.rawOptions.windowsPty;
+    if (windowsPty && windowsPty.buildNumber) {
+      return this._hasScrollback && windowsPty.backend === 'conpty' && windowsPty.buildNumber >= 21376;
+    }
     return this._hasScrollback && !this._optionsService.rawOptions.windowsMode;
   }
 

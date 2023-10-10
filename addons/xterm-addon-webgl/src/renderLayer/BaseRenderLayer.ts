@@ -3,17 +3,17 @@
  * @license MIT
  */
 
-import { IRenderLayer } from './Types';
+import { ReadonlyColorSet } from 'browser/Types';
 import { acquireTextureAtlas } from 'browser/renderer/shared/CharAtlasCache';
-import { Terminal } from 'xterm';
-import { IColorSet, ReadonlyColorSet } from 'browser/Types';
 import { TEXT_BASELINE } from 'browser/renderer/shared/Constants';
-import { ICoreBrowserService, IThemeService } from 'browser/services/Services';
-import { IRenderDimensions, ITextureAtlas } from 'browser/renderer/shared/Types';
-import { CellData } from 'common/buffer/CellData';
 import { throwIfFalsy } from 'browser/renderer/shared/RendererUtils';
+import { IRenderDimensions, ITextureAtlas } from 'browser/renderer/shared/Types';
+import { ICoreBrowserService, IThemeService } from 'browser/services/Services';
 import { Disposable, toDisposable } from 'common/Lifecycle';
+import { CellData } from 'common/buffer/CellData';
 import { IOptionsService } from 'common/services/Services';
+import { Terminal } from 'xterm';
+import { IRenderLayer } from './Types';
 
 export abstract class BaseRenderLayer extends Disposable implements IRenderLayer {
   private _canvas: HTMLCanvasElement;
@@ -49,7 +49,6 @@ export abstract class BaseRenderLayer extends Disposable implements IRenderLayer
     }));
     this.register(toDisposable(() => {
       this._canvas.remove();
-      this._charAtlas?.dispose();
     }));
   }
 
@@ -122,21 +121,6 @@ export abstract class BaseRenderLayer extends Disposable implements IRenderLayer
   public abstract reset(terminal: Terminal): void;
 
   /**
-   * Fills 1+ cells completely. This uses the existing fillStyle on the context.
-   * @param x The column to start at.
-   * @param y The row to start at
-   * @param width The number of columns to fill.
-   * @param height The number of rows to fill.
-   */
-  protected _fillCells(x: number, y: number, width: number, height: number): void {
-    this._ctx.fillRect(
-      x * this._deviceCellWidth,
-      y * this._deviceCellHeight,
-      width * this._deviceCellWidth,
-      height * this._deviceCellHeight);
-  }
-
-  /**
    * Fills a 1px line (2px on HDPI) at the bottom of the cell. This uses the
    * existing fillStyle on the context.
    * @param x The column to fill.
@@ -148,35 +132,6 @@ export abstract class BaseRenderLayer extends Disposable implements IRenderLayer
       (y + 1) * this._deviceCellHeight - this._coreBrowserService.dpr - 1 /* Ensure it's drawn within the cell */,
       width * this._deviceCellWidth,
       this._coreBrowserService.dpr);
-  }
-
-  /**
-   * Fills a 1px line (2px on HDPI) at the left of the cell. This uses the
-   * existing fillStyle on the context.
-   * @param x The column to fill.
-   * @param y The row to fill.
-   */
-  protected _fillLeftLineAtCell(x: number, y: number, width: number): void {
-    this._ctx.fillRect(
-      x * this._deviceCellWidth,
-      y * this._deviceCellHeight,
-      this._coreBrowserService.dpr * width,
-      this._deviceCellHeight);
-  }
-
-  /**
-   * Strokes a 1px rectangle (2px on HDPI) around a cell. This uses the existing
-   * strokeStyle on the context.
-   * @param x The column to fill.
-   * @param y The row to fill.
-   */
-  protected _strokeRectAtCell(x: number, y: number, width: number, height: number): void {
-    this._ctx.lineWidth = this._coreBrowserService.dpr;
-    this._ctx.strokeRect(
-      x * this._deviceCellWidth + this._coreBrowserService.dpr / 2,
-      y * this._deviceCellHeight + (this._coreBrowserService.dpr / 2),
-      width * this._deviceCellWidth - this._coreBrowserService.dpr,
-      (height * this._deviceCellHeight) - this._coreBrowserService.dpr);
   }
 
   /**

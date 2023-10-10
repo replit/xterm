@@ -5,7 +5,7 @@
 
 import { assert } from 'chai';
 import { openTerminal, writeSync, launchBrowser } from '../../../out-test/api/TestUtils';
-import { Browser, Page } from 'playwright';
+import { Browser, Page } from '@playwright/test';
 
 const APP = 'http://127.0.0.1:3001/test';
 
@@ -204,7 +204,6 @@ describe('SerializeAddon', () => {
       sgr(NO_INVISIBLE) + line,
       sgr(NO_STRIKETHROUGH) + line
     ];
-    const rows = lines.length;
     await writeSync(page, lines.join('\\r\\n'));
     assert.equal(await page.evaluate(`serializeAddon.serialize();`), lines.join('\r\n'));
   });
@@ -216,6 +215,18 @@ describe('SerializeAddon', () => {
       (index: number) => digitsString(cols, index, `\x1b[38;5;${16 + index}m`),
       rows
     );
+    await writeSync(page, lines.join('\\r\\n'));
+    assert.equal(await page.evaluate(`serializeAddon.serialize();`), lines.join('\r\n'));
+  });
+
+  it('serialize all rows of content with overline', async () => {
+    const cols = 10;
+    const line = '+'.repeat(cols);
+    const lines: string[] = [
+      sgr(OVERLINED) + line,                   // Overlined
+      sgr(UNDERLINED) + line,                  // Overlined, Underlined
+      sgr(NORMAL) + line                       // Normal
+    ];
     await writeSync(page, lines.join('\\r\\n'));
     assert.equal(await page.evaluate(`serializeAddon.serialize();`), lines.join('\r\n'));
   });
@@ -581,7 +592,6 @@ const FG_RGB_GREEN = '38;2;0;255;0';
 const FG_RGB_YELLOW = '38;2;255;255;0';
 const FG_RESET = '39';
 
-
 const BG_P16_RED = '41';
 const BG_P16_GREEN = '42';
 const BG_P16_YELLOW = '43';
@@ -601,6 +611,7 @@ const BLINK = '5';
 const INVERSE = '7';
 const INVISIBLE = '8';
 const STRIKETHROUGH = '9';
+const OVERLINED = '53';
 
 const NO_BOLD = '22';
 const NO_DIM = '22';
@@ -610,3 +621,4 @@ const NO_BLINK = '25';
 const NO_INVERSE = '27';
 const NO_INVISIBLE = '28';
 const NO_STRIKETHROUGH = '29';
+const NO_OVERLINED = '55';

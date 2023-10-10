@@ -72,6 +72,7 @@ export class BufferDecorationRenderer extends Disposable {
   private _createElement(decoration: IInternalDecoration): HTMLElement {
     const element = document.createElement('div');
     element.classList.add('xterm-decoration');
+    element.classList.toggle('xterm-decoration-top-layer', decoration?.options?.layer === 'top');
     element.style.width = `${Math.round((decoration.options.width || 1) * this._renderService.dimensions.css.cell.width)}px`;
     element.style.height = `${(decoration.options.height || 1) * this._renderService.dimensions.css.cell.height}px`;
     element.style.top = `${(decoration.marker.line - this._bufferService.buffers.active.ydisp) * this._renderService.dimensions.css.cell.height}px`;
@@ -102,6 +103,10 @@ export class BufferDecorationRenderer extends Disposable {
         decoration.element = element;
         this._decorationElements.set(decoration, element);
         this._container.appendChild(element);
+        decoration.onDispose(() => {
+          this._decorationElements.delete(decoration);
+          element!.remove();
+        });
       }
       element.style.top = `${line * this._renderService.dimensions.css.cell.height}px`;
       element.style.display = this._altBufferIsActive ? 'none' : 'block';

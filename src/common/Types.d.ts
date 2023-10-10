@@ -3,13 +3,13 @@
  * @license MIT
  */
 
-import { IFunctionIdentifier, ITerminalOptions as IPublicTerminalOptions } from 'xterm';
-import { IEvent, IEventEmitter } from 'common/EventEmitter';
 import { IDeleteEvent, IInsertEvent } from 'common/CircularList';
+import { IEvent, IEventEmitter } from 'common/EventEmitter';
+import { Attributes, UnderlineStyle } from 'common/buffer/Constants'; // eslint-disable-line no-unused-vars
+import { IBufferSet } from 'common/buffer/Types';
 import { IParams } from 'common/parser/Types';
 import { ICoreMouseService, ICoreService, IOptionsService, IUnicodeService } from 'common/services/Services';
-import { IBufferSet } from 'common/buffer/Types';
-import { Attributes, UnderlineStyle } from 'common/buffer/Constants';
+import { IFunctionIdentifier, ITerminalOptions as IPublicTerminalOptions } from 'xterm';
 
 export interface ICoreTerminal {
   coreMouseService: ICoreMouseService;
@@ -17,7 +17,7 @@ export interface ICoreTerminal {
   optionsService: IOptionsService;
   unicodeService: IUnicodeService;
   buffers: IBufferSet;
-  options: ITerminalOptions;
+  options: Required<ITerminalOptions>;
   registerCsiHandler(id: IFunctionIdentifier, callback: (params: IParams) => boolean | Promise<boolean>): IDisposable;
   registerDcsHandler(id: IFunctionIdentifier, callback: (data: string, param: IParams) => boolean | Promise<boolean>): IDisposable;
   registerEscHandler(id: IFunctionIdentifier, callback: () => boolean | Promise<boolean>): IDisposable;
@@ -37,6 +37,8 @@ export interface ITerminalOptions extends IPublicTerminalOptions {
 }
 
 export type CursorStyle = 'block' | 'underline' | 'bar';
+
+export type CursorInactiveStyle = 'outline' | 'block' | 'bar' | 'underline' | 'none';
 
 export type XtermListener = (...args: any[]) => void;
 
@@ -165,6 +167,7 @@ export interface IAttributeData {
   isDim(): number;
   isStrikethrough(): number;
   isProtected(): number;
+  isOverline(): number;
 
   /**
    * The color mode of the foreground color which determines how to decode {@link getFgColor},
@@ -231,7 +234,7 @@ export interface IBufferLine {
   loadCell(index: number, cell: ICellData): ICellData;
   setCell(index: number, cell: ICellData): void;
   setCellFromCodePoint(index: number, codePoint: number, width: number, fg: number, bg: number, eAttrs: IExtendedAttrs): void;
-  addCodepointToCell(index: number, codePoint: number): void;
+  addCodepointToCell(index: number, codePoint: number, width: number): void;
   insertCells(pos: number, n: number, ch: ICellData, eraseAttr?: IAttributeData): void;
   deleteCells(pos: number, n: number, fill: ICellData, eraseAttr?: IAttributeData): void;
   replaceCells(start: number, end: number, fill: ICellData, eraseAttr?: IAttributeData, respectProtect?: boolean): void;
@@ -241,6 +244,7 @@ export interface IBufferLine {
   copyFrom(line: IBufferLine): void;
   clone(): IBufferLine;
   getTrimmedLength(): number;
+  getNoBgTrimmedLength(): number;
   translateToString(trimRight?: boolean, startCol?: number, endCol?: number): string;
 
   /* direct access to cell attrs */
@@ -412,23 +416,32 @@ export const enum ColorRequestType {
   SET = 1,
   RESTORE = 2
 }
-export const enum ColorIndex {
+
+// IntRange from https://stackoverflow.com/a/39495173
+type Enumerate<N extends number, Acc extends number[] = []> = Acc['length'] extends N
+  ? Acc[number]
+  : Enumerate<N, [...Acc, Acc['length']]>;
+type IntRange<F extends number, T extends number> = Exclude<Enumerate<T>, Enumerate<F>>;
+
+type ColorIndex = IntRange<0, 256>; // number from 0 to 255
+type AllColorIndex = ColorIndex | SpecialColorIndex;
+export const enum SpecialColorIndex {
   FOREGROUND = 256,
   BACKGROUND = 257,
   CURSOR = 258
 }
 export interface IColorReportRequest {
   type: ColorRequestType.REPORT;
-  index: ColorIndex;
+  index: AllColorIndex;
 }
 export interface IColorSetRequest {
   type: ColorRequestType.SET;
-  index: ColorIndex;
+  index: AllColorIndex;
   color: IColorRGB;
 }
 export interface IColorRestoreRequest {
   type: ColorRequestType.RESTORE;
-  index?: ColorIndex;
+  index?: AllColorIndex;
 }
 export type IColorEvent = (IColorReportRequest | IColorSetRequest | IColorRestoreRequest)[];
 
@@ -531,7 +544,7 @@ export interface IInputHandler {
   /** ESC # 8 */ screenAlignmentPattern(): boolean;
 }
 
-interface IParseStack {
+export interface IParseStack {
   paused: boolean;
   cursorStartX: number;
   cursorStartY: number;

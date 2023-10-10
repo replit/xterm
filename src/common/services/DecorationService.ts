@@ -9,7 +9,7 @@ import { Disposable, toDisposable } from 'common/Lifecycle';
 import { IDecorationService, IInternalDecoration } from 'common/services/Services';
 import { SortedList } from 'common/SortedList';
 import { IColor } from 'common/Types';
-import { IDecorationOptions, IDecoration, IMarker, IEvent } from 'xterm';
+import { IDecoration, IDecorationOptions, IMarker } from 'xterm';
 
 // Work variables to avoid garbage collection
 let $xmin = 0;
@@ -35,12 +35,7 @@ export class DecorationService extends Disposable implements IDecorationService 
   constructor() {
     super();
 
-    this.register(toDisposable(() => {
-      for (const d of this._decorations.values()) {
-        this._onDecorationRemoved.fire(d);
-      }
-      this.reset();
-    }));
+    this.register(toDisposable(() => this.reset()));
   }
 
   public registerDecoration(options: IDecorationOptions): IDecoration | undefined {
@@ -92,19 +87,12 @@ export class DecorationService extends Disposable implements IDecorationService 
       }
     });
   }
-
-  public dispose(): void {
-    for (const d of this._decorations.values()) {
-      this._onDecorationRemoved.fire(d);
-    }
-    this.reset();
-  }
 }
 
 class Decoration extends Disposable implements IInternalDecoration {
   public readonly marker: IMarker;
   public element: HTMLElement | undefined;
-  public isDisposed: boolean = false;
+  public get isDisposed(): boolean { return this._isDisposed; }
 
   public readonly onRenderEmitter = this.register(new EventEmitter<HTMLElement>());
   public readonly onRender = this.onRenderEmitter.event;

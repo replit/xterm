@@ -3,13 +3,13 @@
  * @license MIT
  */
 
-import { ILinkifier2, ILinkProvider, IBufferCellPosition, ILink, ILinkifierEvent, ILinkDecorations, ILinkWithState } from 'browser/Types';
-import { IDisposable } from 'common/Types';
-import { IMouseService, IRenderService } from './services/Services';
-import { IBufferService } from 'common/services/Services';
-import { EventEmitter, IEvent } from 'common/EventEmitter';
-import { Disposable, getDisposeArrayDisposable, disposeArray, toDisposable } from 'common/Lifecycle';
 import { addDisposableDomListener } from 'browser/Lifecycle';
+import { IBufferCellPosition, ILink, ILinkDecorations, ILinkProvider, ILinkWithState, ILinkifier2, ILinkifierEvent } from 'browser/Types';
+import { EventEmitter } from 'common/EventEmitter';
+import { Disposable, disposeArray, getDisposeArrayDisposable, toDisposable } from 'common/Lifecycle';
+import { IDisposable } from 'common/Types';
+import { IBufferService } from 'common/services/Services';
+import { IMouseService, IRenderService } from './services/Services';
 
 export class Linkifier2 extends Disposable implements ILinkifier2 {
   private _element: HTMLElement | undefined;
@@ -109,7 +109,8 @@ export class Linkifier2 extends Disposable implements ILinkifier2 {
   }
 
   private _handleHover(position: IBufferCellPosition): void {
-    // TODO: This currently does not cache link provider results across wrapped lines, activeLine should be something like `activeRange: {startY, endY}`
+    // TODO: This currently does not cache link provider results across wrapped lines, activeLine
+    //       should be something like `activeRange: {startY, endY}`
     // Check if we need to clear the link
     if (this._activeLine !== position.y || this._wasResized) {
       this._clearCurrentLink();
